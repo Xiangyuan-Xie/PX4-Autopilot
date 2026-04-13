@@ -188,6 +188,12 @@ subscriptions:
   - topic: /fmu/in/actuator_servos
     type: px4_msgs::msg::ActuatorServos
 
+  - topic: /fmu/in/arm_joint_command
+    type: px4_msgs::msg::ArmJointCommand
+
+  - topic: /fmu/in/arm_joint_state
+    type: px4_msgs::msg::ArmJointState
+
   - topic: /fmu/in/aux_global_position
     type: px4_msgs::msg::VehicleGlobalPosition
 
