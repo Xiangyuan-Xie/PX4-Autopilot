@@ -44,7 +44,6 @@ set(msg_files
 	ActuatorServosTrim.msg
 	ActuatorTest.msg
 	AdcReport.msg
-	ArmJointCommand.msg
 	ArmJointState.msg
 	Airspeed.msg
 	AirspeedWind.msg

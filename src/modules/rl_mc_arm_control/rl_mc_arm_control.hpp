@@ -22,7 +22,6 @@
 #include <uORB/Subscription.hpp>
 #include <uORB/SubscriptionCallback.hpp>
 #include <uORB/topics/actuator_motors.h>
-#include <uORB/topics/arm_joint_command.h>
 #include <uORB/topics/arm_joint_state.h>
 #include <uORB/topics/arming_check_reply.h>
 #include <uORB/topics/arming_check_request.h>
@@ -98,7 +97,6 @@ private:
 	uORB::Subscription _position_sub{ORB_ID(vehicle_local_position)};
 	uORB::Subscription _trajectory_setpoint_sub{ORB_ID(trajectory_setpoint)};
 	uORB::Subscription _attitude_sub{ORB_ID(vehicle_attitude)};
-	uORB::Subscription _arm_joint_command_sub{ORB_ID(arm_joint_command)};
 	uORB::Subscription _arm_joint_state_sub{ORB_ID(arm_joint_state)};
 	uORB::SubscriptionCallbackWorkItem _angular_velocity_sub{this, ORB_ID(vehicle_angular_velocity)};
 
@@ -124,7 +122,6 @@ private:
 	vehicle_angular_velocity_s _angular_velocity{};
 	vehicle_local_position_s _position{};
 	vehicle_attitude_s _attitude{};
-	arm_joint_command_s _arm_joint_command{};
 	arm_joint_state_s _arm_joint_state{};
 	matrix::Vector3f _root_pos_w{};
 	matrix::Quaternionf _root_quat_w{};

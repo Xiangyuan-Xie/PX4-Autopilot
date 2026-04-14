@@ -85,7 +85,6 @@ void RlMcArmControl::resetState()
 	_position = {};
 	_attitude = {};
 	_angular_velocity = {};
-	_arm_joint_command = {};
 	_arm_joint_state = {};
 	_prev_action = {{0.f, 0.f, 0.f, 0.f}};
 	_root_pos_w = matrix::Vector3f();
@@ -334,7 +333,6 @@ bool RlMcArmControl::updateVehicleState(float &dt_s)
 
 	_attitude_sub.update(&_attitude);
 	_position_sub.update(&_position);
-	_arm_joint_command_sub.update(&_arm_joint_command);
 	_arm_joint_state_sub.update(&_arm_joint_state);
 	if (!PX4_ISFINITE(_position.x) || !PX4_ISFINITE(_position.y) || !PX4_ISFINITE(_position.z)) {
 		return false;
@@ -418,9 +416,6 @@ void RlMcArmControl::buildObservation(RlToolsAdapter::Observation &observation)
 	observation[idx++] = ang_vel_err_b(1);
 	observation[idx++] = ang_vel_err_b(2);
 
-	for (int i = 0; i < kArmJointDim; ++i) {
-		observation[idx++] = _arm_joint_command.arm_command[i];
-	}
 	for (int i = 0; i < kArmJointDim; ++i) {
 		observation[idx++] = _arm_joint_state.arm_position[i];
 	}
