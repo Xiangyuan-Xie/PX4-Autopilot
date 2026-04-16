@@ -33,6 +33,8 @@
 
 #include "FlightModeManager.hpp"
 
+#include "../commander/ModeUtil/control_mode.hpp"
+
 #include <lib/mathlib/mathlib.h>
 #include <lib/matrix/matrix/math.hpp>
 
@@ -135,10 +137,14 @@ void FlightModeManager::updateParams()
 
 void FlightModeManager::start_flight_task()
 {
+	const uint8_t nav_state = _vehicle_status_sub.get().nav_state;
+	const bool external_nav_state = nav_state >= vehicle_status_s::NAVIGATION_STATE_EXTERNAL1
+				       && nav_state <= vehicle_status_s::NAVIGATION_STATE_EXTERNAL8;
+	const bool am_position_mode = external_nav_state
+				      && mode_util::isAmPositionControlMode(_vehicle_control_mode_sub.get());
+
 	// Do not run any flight task for VTOLs in fixed-wing mode
-	if ((_vehicle_status_sub.get().vehicle_type == vehicle_status_s::VEHICLE_TYPE_FIXED_WING)
-	    || ((_vehicle_status_sub.get().nav_state >= vehicle_status_s::NAVIGATION_STATE_EXTERNAL1)
-		&& (_vehicle_status_sub.get().nav_state <= vehicle_status_s::NAVIGATION_STATE_EXTERNAL8))) {
+	if (_vehicle_status_sub.get().vehicle_type == vehicle_status_s::VEHICLE_TYPE_FIXED_WING) {
 		switchTask(FlightTaskIndex::None);
 		return;
 	}
@@ -152,7 +158,11 @@ void FlightModeManager::start_flight_task()
 	bool found_some_task = false;
 	bool matching_task_running = true;
 	bool task_failure = false;
-	const bool nav_state_descend = (_vehicle_status_sub.get().nav_state == vehicle_status_s::NAVIGATION_STATE_DESCEND);
+	const bool nav_state_descend = (nav_state == vehicle_status_s::NAVIGATION_STATE_DESCEND);
+	if (external_nav_state && !am_position_mode) {
+		switchTask(FlightTaskIndex::None);
+		return;
+	}
 
 	// Follow me
 	if (_vehicle_status_sub.get().nav_state == vehicle_status_s::NAVIGATION_STATE_AUTO_FOLLOW_TARGET) {
@@ -203,8 +213,15 @@ void FlightModeManager::start_flight_task()
 		task_failure = error != FlightTaskError::NoError;
 	}
 
+	if (am_position_mode) {
+		found_some_task = true;
+		FlightTaskError error = switchTask(FlightTaskIndex::ManualAmPosition);
+		task_failure = error != FlightTaskError::NoError;
+		matching_task_running = matching_task_running && !task_failure;
+	}
+
 	// Manual position control
-	if ((_vehicle_status_sub.get().nav_state == vehicle_status_s::NAVIGATION_STATE_POSCTL) || task_failure) {
+	if ((nav_state == vehicle_status_s::NAVIGATION_STATE_POSCTL) || (task_failure && !external_nav_state)) {
 		found_some_task = true;
 		FlightTaskError error = FlightTaskError::NoError;
 
@@ -230,7 +247,7 @@ void FlightModeManager::start_flight_task()
 	}
 
 	// Manual altitude control
-	if ((_vehicle_status_sub.get().nav_state == vehicle_status_s::NAVIGATION_STATE_ALTCTL) || task_failure) {
+	if ((nav_state == vehicle_status_s::NAVIGATION_STATE_ALTCTL) || (task_failure && !external_nav_state)) {
 		found_some_task = true;
 		FlightTaskError error = FlightTaskError::NoError;
 

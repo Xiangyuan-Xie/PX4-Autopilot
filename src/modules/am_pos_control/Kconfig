@@ -1,0 +1,12 @@
+menuconfig MODULES_AM_POS_CONTROL
+	bool "am_pos_control"
+	default n
+	---help---
+		Enable support for the AM Position direct-actuator controller.
+
+menuconfig USER_AM_POS_CONTROL
+	bool "am_pos_control running as userspace module"
+	default n
+	depends on BOARD_PROTECTED && MODULES_AM_POS_CONTROL
+	---help---
+		Put am_pos_control in userspace memory.

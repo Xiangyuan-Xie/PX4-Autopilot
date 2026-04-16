@@ -9,25 +9,20 @@ get_directory_property(FLAGS COMPILE_OPTIONS)
 list(REMOVE_ITEM FLAGS "-Wcast-align")
 set_directory_properties(PROPERTIES COMPILE_OPTIONS "${FLAGS}")
 
-px4_add_library(rl_mc_arm_control_manual_reference
-	rl_mc_arm_control_manual_reference.cpp
-)
-target_link_libraries(rl_mc_arm_control_manual_reference PUBLIC mathlib motion_planning)
-target_include_directories(rl_mc_arm_control_manual_reference PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-
 px4_add_module(
-	MODULE rl_mc_arm_control
-	MAIN rl_mc_arm_control
+	MODULE am_pos_control
+	MAIN am_pos_control
 	COMPILE_FLAGS
 	SRCS
-		rl_mc_arm_control.cpp
-		rl_mc_arm_control.hpp
-		rl_mc_arm_control_manual_reference.hpp
+		am_pos_control.cpp
+		am_pos_control.hpp
 		rl_tools_adapter.cpp
 		rl_tools_adapter.hpp
 	DEPENDS
 		px4_work_queue
 		mathlib
-		motion_planning
-		rl_mc_arm_control_manual_reference
 )
+
+target_include_directories(am_pos_control PRIVATE ${PX4_SOURCE_DIR}/third_party/rl_tools/include)
+target_compile_features(am_pos_control PRIVATE cxx_std_17)
+target_compile_options(am_pos_control PRIVATE -Wno-unused-local-typedefs)

@@ -49,6 +49,10 @@ menu "Zenoh publishers/subscribers"
 		bool "airspeed_wind"
 		default n
 
+	config ZENOH_PUBSUB_ARM_JOINT_STATE
+		bool "arm_joint_state"
+		default n
+
 	config ZENOH_PUBSUB_ARMING_CHECK_REPLY
 		bool "arming_check_reply"
 		default n
@@ -954,6 +958,7 @@ config ZENOH_PUBSUB_ALL_SELECTION
 	select ZENOH_PUBSUB_AIRSPEED
 	select ZENOH_PUBSUB_AIRSPEED_VALIDATED
 	select ZENOH_PUBSUB_AIRSPEED_WIND
+	select ZENOH_PUBSUB_ARM_JOINT_STATE
 	select ZENOH_PUBSUB_ARMING_CHECK_REPLY
 	select ZENOH_PUBSUB_ARMING_CHECK_REQUEST
 	select ZENOH_PUBSUB_AUTOTUNE_ATTITUDE_CONTROL_STATUS

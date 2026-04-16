@@ -1,17 +1,17 @@
 /****************************************************************************
  *
- * RL multicopter arm direct actuator controller.
+ * AM Position direct actuator controller.
  *
  ****************************************************************************/
 
-#include "rl_mc_arm_control.hpp"
+#include "am_pos_control.hpp"
 
 #include <cmath>
 #include <cstring>
 
 namespace
 {
-constexpr char kModeName[] = "RL Arm Control";
+constexpr char kModeName[] = "AM Position";
 const matrix::Vector3f kGravityEnu{0.0f, 0.0f, -1.0f};
 constexpr float kHalfSqrt2 = 0.7071067811865476f;
 
@@ -56,7 +56,7 @@ float yawNedToEnu(float yaw_ned_rad)
 }
 }
 
-RlMcArmControl::RlMcArmControl() :
+AmPosControl::AmPosControl() :
 	ModuleParams(nullptr),
 	WorkItem(MODULE_NAME, px4::wq_configurations::nav_and_controllers),
 	_loop_perf(perf_alloc(PC_ELAPSED, MODULE_NAME": cycle"))
@@ -64,12 +64,12 @@ RlMcArmControl::RlMcArmControl() :
 	resetState();
 }
 
-RlMcArmControl::~RlMcArmControl()
+AmPosControl::~AmPosControl()
 {
 	perf_free(_loop_perf);
 }
 
-bool RlMcArmControl::init()
+bool AmPosControl::init()
 {
 	if (!_angular_velocity_sub.registerCallback()) {
 		PX4_ERR("callback registration failed");
@@ -79,60 +79,37 @@ bool RlMcArmControl::init()
 	return _adapter.init();
 }
 
-void RlMcArmControl::resetState()
+void AmPosControl::resetCommandReference()
+{
+	_current_cmd_ref = {};
+}
+
+void AmPosControl::resetState()
 {
 	_trajectory_setpoint = {};
 	_position = {};
 	_attitude = {};
 	_angular_velocity = {};
 	_arm_joint_state = {};
-	_prev_action = {{0.f, 0.f, 0.f, 0.f}};
-	_root_pos_w = matrix::Vector3f();
+	for (int i = 0; i < kActionDim; ++i) {
+		_prev_action[i] = 0.0f;
+	}
+	_root_pos_w.zero();
 	_root_quat_w = matrix::Quatf();
-	_root_lin_vel_w = matrix::Vector3f();
-	_root_lin_vel_b = matrix::Vector3f();
-	_root_ang_vel_b = matrix::Vector3f();
+	_root_lin_vel_w.zero();
+	_root_lin_vel_b.zero();
+	_root_ang_vel_b.zero();
 	_heading_w = 0.0f;
-	resetHoverLock();
-	resetManualReferenceState();
+	resetCommandReference();
 	_adapter.reset();
 }
 
-void RlMcArmControl::resetHoverLock()
-{
-	_hover_lock_active = false;
-	_hover_lock_pos_w = matrix::Vector3f();
-	_hover_lock_yaw_w = 0.0f;
-	_current_cmd_ref = {};
-}
-
-void RlMcArmControl::resetManualReferenceState()
-{
-	_manual_reference.reset();
-	_last_manual_control_valid = false;
-	_last_manual_control_nonzero = false;
-	_last_manual_hold_xy = false;
-	_last_manual_hold_z = false;
-	_last_manual_hold_yaw = false;
-	_last_raw_roll = 0.0f;
-	_last_raw_pitch = 0.0f;
-	_last_raw_yaw = 0.0f;
-	_last_raw_throttle = 0.0f;
-	_last_processed_roll = 0.0f;
-	_last_processed_pitch = 0.0f;
-	_last_processed_yaw = 0.0f;
-	_last_processed_throttle = 0.0f;
-	_last_desired_pos_w.zero();
-	_last_desired_lin_vel_b.zero();
-	_last_desired_ang_vel_b.zero();
-}
-
-bool RlMcArmControl::anyAxisActive(const std::array<bool, 3> &axes) const
+bool AmPosControl::anyAxisActive(const bool axes[3]) const
 {
 	return axes[0] || axes[1] || axes[2];
 }
 
-void RlMcArmControl::registerMode()
+void AmPosControl::registerMode()
 {
 	register_ext_component_request_s request{};
 	request.timestamp = hrt_absolute_time();
@@ -144,7 +121,7 @@ void RlMcArmControl::registerMode()
 	_register_ext_component_request_pub.publish(request);
 }
 
-void RlMcArmControl::unregisterMode()
+void AmPosControl::unregisterMode()
 {
 	if (_mode_id < 0) {
 		return;
@@ -158,7 +135,7 @@ void RlMcArmControl::unregisterMode()
 	_unregister_ext_component_pub.publish(request);
 }
 
-void RlMcArmControl::configureMode(int8_t mode_id)
+void AmPosControl::configureMode(int8_t mode_id)
 {
 	vehicle_control_mode_s config{};
 	config.timestamp = hrt_absolute_time();
@@ -166,10 +143,11 @@ void RlMcArmControl::configureMode(int8_t mode_id)
 	config.flag_multicopter_position_control_enabled = false;
 	config.flag_control_manual_enabled = true;
 	config.flag_control_offboard_enabled = false;
-	config.flag_control_position_enabled = false;
-	config.flag_control_velocity_enabled = false;
-	config.flag_control_altitude_enabled = false;
-	config.flag_control_climb_rate_enabled = false;
+	config.flag_control_auto_enabled = false;
+	config.flag_control_position_enabled = true;
+	config.flag_control_velocity_enabled = true;
+	config.flag_control_altitude_enabled = true;
+	config.flag_control_climb_rate_enabled = true;
 	config.flag_control_acceleration_enabled = false;
 	config.flag_control_attitude_enabled = false;
 	config.flag_control_rates_enabled = false;
@@ -178,7 +156,7 @@ void RlMcArmControl::configureMode(int8_t mode_id)
 	_config_control_setpoints_pub.publish(config);
 }
 
-void RlMcArmControl::replyToArmingCheck(int8_t request_id)
+void AmPosControl::replyToArmingCheck(int8_t request_id)
 {
 	arming_check_reply_s reply{};
 	reply.timestamp = hrt_absolute_time();
@@ -187,23 +165,36 @@ void RlMcArmControl::replyToArmingCheck(int8_t request_id)
 	reply.health_component_index = reply.HEALTH_COMPONENT_INDEX_NONE;
 	reply.num_events = 0;
 	reply.can_arm_and_run = true;
-	reply.mode_req_angular_velocity = false;
+	reply.mode_req_angular_velocity = true;
 	reply.mode_req_local_position = true;
-	reply.mode_req_attitude = false;
-	reply.mode_req_local_alt = false;
-	reply.mode_req_manual_control = true;
+	reply.mode_req_attitude = true;
+	reply.mode_req_local_alt = true;
+	reply.mode_req_manual_control = _param_manual_control.get() != 0;
 
+	_arm_joint_state_sub.update(&_arm_joint_state);
 	_sticks.checkAndUpdateStickInputs();
-	const bool manual_input_valid = _sticks.isAvailable();
+	const bool manual_control_available = _sticks.isAvailable();
+	const bool arm_state_valid = armStateValid();
 
-	if (!manual_input_valid) {
+	if (reply.mode_req_manual_control && !manual_control_available
+	    && hrt_elapsed_time(&_last_manual_control_diag) > 1_s) {
+		_last_manual_control_diag = hrt_absolute_time();
+		PX4_WARN("AM Position waiting for manual control input");
+	}
+
+	if (!arm_state_valid) {
 		reply.can_arm_and_run = false;
+
+		if (hrt_elapsed_time(&_last_arm_state_diag) > 1_s) {
+			_last_arm_state_diag = hrt_absolute_time();
+			PX4_WARN("AM Position cannot run: arm_joint_state invalid or stale");
+		}
 	}
 
 	_arming_check_reply_pub.publish(reply);
 }
 
-void RlMcArmControl::checkModeRegistration()
+void AmPosControl::checkModeRegistration()
 {
 	register_ext_component_reply_s reply{};
 	int tries = reply.ORB_QUEUE_LENGTH;
@@ -227,102 +218,7 @@ void RlMcArmControl::checkModeRegistration()
 	}
 }
 
-void RlMcArmControl::generateManualTargets(matrix::Vector3f &desired_lin_vel_b,
-	matrix::Vector3f &desired_ang_vel_b, matrix::Vector3f &desired_pos_w, matrix::Quatf &desired_quat_w,
-	float dt_s)
-{
-	_sticks.checkAndUpdateStickInputs();
-	_last_manual_control_valid = _sticks.isAvailable();
-	_last_raw_roll = _sticks.getRoll();
-	_last_raw_pitch = _sticks.getPitch();
-	_last_raw_yaw = _sticks.getYaw();
-	_last_raw_throttle = _sticks.getThrottleZeroCentered();
-
-	RlMcArmControlManualReference::Params params{};
-	params.vel_manual = _param_mapc_vel_manual.get();
-	params.vel_side = _param_mapc_vel_side.get();
-	params.vel_back = _param_mapc_vel_back.get();
-	params.acc_hor = _param_mapc_acc_hor.get();
-	params.jerk_max = _param_mapc_jerk_max.get();
-	params.z_vel_up = _param_mapc_z_vel_up.get();
-	params.z_vel_down = _param_mapc_z_vel_dn.get();
-	params.man_y_max_rad = math::radians(_param_mapc_man_y_max.get());
-	params.man_y_tau = _param_mapc_man_y_tau.get();
-	params.man_deadzone = _param_mapc_man_dz.get();
-	params.hold_max_xy = _param_mapc_hold_max_xy.get();
-	params.hold_max_z = _param_mapc_hold_max_z.get();
-
-	RlMcArmControlManualReference::Input input{};
-	input.dt_s = dt_s;
-	input.sticks_available = _last_manual_control_valid;
-	input.roll = _last_raw_roll;
-	input.pitch = _last_raw_pitch;
-	input.yaw = _last_raw_yaw;
-	input.throttle = _last_raw_throttle;
-	input.root_pos_w = _root_pos_w;
-	input.root_quat_w = _root_quat_w;
-	input.root_lin_vel_w = _root_lin_vel_w;
-	input.heading_w = _heading_w;
-	input.position_z_ned = _position.z;
-	input.velocity_z_ned = _position.vz;
-
-	const RlMcArmControlManualReference::Output output = _manual_reference.update(params, input);
-
-	desired_lin_vel_b = output.desired_lin_vel_b;
-	desired_ang_vel_b = output.desired_ang_vel_b;
-	desired_pos_w = output.desired_pos_w;
-	desired_quat_w = output.desired_quat_w;
-
-	_last_processed_roll = output.processed_roll;
-	_last_processed_pitch = output.processed_pitch;
-	_last_processed_yaw = output.processed_yaw;
-	_last_processed_throttle = output.processed_throttle;
-	_last_manual_control_nonzero = fabsf(output.processed_roll) > FLT_EPSILON
-				       || fabsf(output.processed_pitch) > FLT_EPSILON
-				       || fabsf(output.processed_yaw) > FLT_EPSILON
-				       || fabsf(output.processed_throttle) > FLT_EPSILON;
-	_last_manual_hold_xy = output.hold_xy_active;
-	_last_manual_hold_z = output.hold_z_active;
-	_last_manual_hold_yaw = output.hold_yaw_active;
-	_last_desired_pos_w = desired_pos_w;
-	_last_desired_lin_vel_b = desired_lin_vel_b;
-	_last_desired_ang_vel_b = desired_ang_vel_b;
-}
-
-void RlMcArmControl::updateTargets(float dt_s)
-{
-	matrix::Vector3f desired_lin_vel_b{};
-	matrix::Vector3f desired_ang_vel_b{};
-	matrix::Vector3f desired_pos_w{_root_pos_w};
-	matrix::Quatf desired_quat_w{yawOnlyQuat(_heading_w)};
-	desired_lin_vel_b.zero();
-	desired_ang_vel_b.zero();
-
-	generateManualTargets(desired_lin_vel_b, desired_ang_vel_b, desired_pos_w, desired_quat_w, dt_s);
-
-	std::array<bool, 3> lin_active{{
-		fabsf(desired_lin_vel_b(0)) > kCmdZeroEps,
-		fabsf(desired_lin_vel_b(1)) > kCmdZeroEps,
-		fabsf(desired_lin_vel_b(2)) > kCmdZeroEps,
-	}};
-
-	std::array<bool, 3> ang_active{{
-		false,
-		false,
-		fabsf(desired_ang_vel_b(2)) > kCmdZeroEps,
-	}};
-
-	_current_cmd_ref.desired_lin_vel_b = desired_lin_vel_b;
-	_current_cmd_ref.desired_ang_vel_b = desired_ang_vel_b;
-	_current_cmd_ref.desired_pos_w = desired_pos_w;
-	_current_cmd_ref.desired_quat_w = desired_quat_w;
-	_current_cmd_ref.lin_cmd_active = lin_active;
-	_current_cmd_ref.ang_cmd_active = ang_active;
-	_current_cmd_ref.has_lin_vel_cmd = anyAxisActive(lin_active);
-	_current_cmd_ref.has_ang_vel_cmd = anyAxisActive(ang_active);
-}
-
-bool RlMcArmControl::updateVehicleState(float &dt_s)
+bool AmPosControl::updateVehicleState(float &dt_s)
 {
 	if (!_angular_velocity_sub.update(&_angular_velocity)) {
 		return false;
@@ -334,7 +230,8 @@ bool RlMcArmControl::updateVehicleState(float &dt_s)
 	_attitude_sub.update(&_attitude);
 	_position_sub.update(&_position);
 	_arm_joint_state_sub.update(&_arm_joint_state);
-	if (!PX4_ISFINITE(_position.x) || !PX4_ISFINITE(_position.y) || !PX4_ISFINITE(_position.z)) {
+
+	if (!vehicleStateValid()) {
 		return false;
 	}
 
@@ -342,7 +239,81 @@ bool RlMcArmControl::updateVehicleState(float &dt_s)
 	return true;
 }
 
-void RlMcArmControl::updateConvertedState()
+bool AmPosControl::attitudeValid() const
+{
+	const hrt_abstime now = hrt_absolute_time();
+
+	if ((_attitude.timestamp == 0) || (now > _attitude.timestamp + kStateTimeout)) {
+		return false;
+	}
+
+	const matrix::Quatf q{_attitude.q};
+	const float norm = q.norm();
+	return PX4_ISFINITE(q(0)) && PX4_ISFINITE(q(1)) && PX4_ISFINITE(q(2)) && PX4_ISFINITE(q(3))
+	       && PX4_ISFINITE(norm) && (fabsf(1.f - norm) <= 1e-3f);
+}
+
+bool AmPosControl::angularVelocityValid() const
+{
+	const hrt_abstime now = hrt_absolute_time();
+
+	if ((_angular_velocity.timestamp == 0) || (now > _angular_velocity.timestamp + kStateTimeout)) {
+		return false;
+	}
+
+	return PX4_ISFINITE(_angular_velocity.xyz[0]) && PX4_ISFINITE(_angular_velocity.xyz[1])
+	       && PX4_ISFINITE(_angular_velocity.xyz[2]);
+}
+
+bool AmPosControl::vehicleStateValid() const
+{
+	const hrt_abstime now = hrt_absolute_time();
+
+	if ((_position.timestamp == 0) || (now > _position.timestamp + kStateTimeout)) {
+		return false;
+	}
+
+	const bool xy_valid = _position.xy_valid && PX4_ISFINITE(_position.x) && PX4_ISFINITE(_position.y);
+	const bool z_valid = _position.z_valid && PX4_ISFINITE(_position.z);
+	const bool v_xy_valid = _position.v_xy_valid && PX4_ISFINITE(_position.vx) && PX4_ISFINITE(_position.vy);
+	const bool v_z_valid = _position.v_z_valid && PX4_ISFINITE(_position.vz);
+	const bool heading_valid = PX4_ISFINITE(_position.heading);
+
+	return xy_valid && z_valid && v_xy_valid && v_z_valid && heading_valid && attitudeValid() && angularVelocityValid();
+}
+
+bool AmPosControl::armStateValid() const
+{
+	const hrt_abstime now = hrt_absolute_time();
+
+	if ((_arm_joint_state.timestamp == 0) || (now > _arm_joint_state.timestamp + kArmStateTimeout)) {
+		return false;
+	}
+
+	for (int i = 0; i < kArmJointDim; ++i) {
+		if (!PX4_ISFINITE(_arm_joint_state.arm_position[i]) || !PX4_ISFINITE(_arm_joint_state.arm_velocity[i])) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool AmPosControl::trajectorySetpointValid() const
+{
+	const hrt_abstime now = hrt_absolute_time();
+
+	if ((_trajectory_setpoint.timestamp == 0) || (now > _trajectory_setpoint.timestamp + kTrajectorySetpointTimeout)) {
+		return false;
+	}
+
+	return PX4_ISFINITE(_trajectory_setpoint.position[0]) || PX4_ISFINITE(_trajectory_setpoint.position[1])
+	       || PX4_ISFINITE(_trajectory_setpoint.position[2]) || PX4_ISFINITE(_trajectory_setpoint.velocity[0])
+	       || PX4_ISFINITE(_trajectory_setpoint.velocity[1]) || PX4_ISFINITE(_trajectory_setpoint.velocity[2])
+	       || PX4_ISFINITE(_trajectory_setpoint.yaw) || PX4_ISFINITE(_trajectory_setpoint.yawspeed);
+}
+
+void AmPosControl::updateConvertedState()
 {
 	const matrix::Vector3f pos_ned(_position.x, _position.y, _position.z);
 	const matrix::Vector3f vel_ned(_position.vx, _position.vy, _position.vz);
@@ -357,9 +328,65 @@ void RlMcArmControl::updateConvertedState()
 	_root_ang_vel_b = frdToFlu(ang_vel_frd);
 }
 
-void RlMcArmControl::buildObservation(RlToolsAdapter::Observation &observation)
+void AmPosControl::updateTargets()
 {
-	observation.fill(0.0f);
+	_trajectory_setpoint_sub.update(&_trajectory_setpoint);
+
+	matrix::Vector3f desired_pos_ned(_position.x, _position.y, _position.z);
+	for (int i = 0; i < 3; ++i) {
+		if (PX4_ISFINITE(_trajectory_setpoint.position[i])) {
+			desired_pos_ned(i) = _trajectory_setpoint.position[i];
+		}
+	}
+
+	matrix::Vector3f desired_vel_ned{};
+	for (int i = 0; i < 3; ++i) {
+		desired_vel_ned(i) = PX4_ISFINITE(_trajectory_setpoint.velocity[i]) ? _trajectory_setpoint.velocity[i] : 0.0f;
+	}
+
+	const matrix::Vector3f desired_vel_w = positionNedToEnu(desired_vel_ned);
+	const matrix::Vector3f desired_lin_vel_b = _root_quat_w.inversed().rotateVector(desired_vel_w);
+	matrix::Vector3f desired_ang_vel_b{};
+	desired_ang_vel_b.zero();
+
+	if (PX4_ISFINITE(_trajectory_setpoint.yawspeed)) {
+		// `trajectory_setpoint` is expressed in NED, while the policy uses FLU/ENU.
+		desired_ang_vel_b(2) = -_trajectory_setpoint.yawspeed;
+	}
+
+	const float desired_yaw_w = PX4_ISFINITE(_trajectory_setpoint.yaw) ? yawNedToEnu(_trajectory_setpoint.yaw) : _heading_w;
+	const matrix::Quatf desired_quat_w = yawOnlyQuat(desired_yaw_w);
+	const matrix::Vector3f desired_pos_w = positionNedToEnu(desired_pos_ned);
+
+	const bool lin_active[3]{
+		PX4_ISFINITE(_trajectory_setpoint.velocity[0]) && fabsf(desired_lin_vel_b(0)) > kCmdZeroEps,
+		PX4_ISFINITE(_trajectory_setpoint.velocity[1]) && fabsf(desired_lin_vel_b(1)) > kCmdZeroEps,
+		PX4_ISFINITE(_trajectory_setpoint.velocity[2]) && fabsf(desired_lin_vel_b(2)) > kCmdZeroEps,
+	};
+
+	const bool ang_active[3]{
+		false,
+		false,
+		PX4_ISFINITE(_trajectory_setpoint.yawspeed) && fabsf(desired_ang_vel_b(2)) > kCmdZeroEps,
+	};
+
+	_current_cmd_ref.desired_lin_vel_b = desired_lin_vel_b;
+	_current_cmd_ref.desired_ang_vel_b = desired_ang_vel_b;
+	_current_cmd_ref.desired_pos_w = desired_pos_w;
+	_current_cmd_ref.desired_quat_w = desired_quat_w;
+	for (int i = 0; i < 3; ++i) {
+		_current_cmd_ref.lin_cmd_active[i] = lin_active[i];
+		_current_cmd_ref.ang_cmd_active[i] = ang_active[i];
+	}
+	_current_cmd_ref.has_lin_vel_cmd = anyAxisActive(lin_active);
+	_current_cmd_ref.has_ang_vel_cmd = anyAxisActive(ang_active);
+}
+
+void AmPosControl::buildObservation(RlToolsAdapter::Observation &observation)
+{
+	for (int i = 0; i < RlToolsAdapter::ObservationDim; ++i) {
+		observation[i] = 0.0f;
+	}
 
 	const matrix::Vector3f &root_pos_w = _root_pos_w;
 	const matrix::Quatf &root_quat_w = _root_quat_w;
@@ -383,9 +410,11 @@ void RlMcArmControl::buildObservation(RlToolsAdapter::Observation &observation)
 	if (_current_cmd_ref.ang_cmd_active[0]) {
 		roll_err = 0.0f;
 	}
+
 	if (_current_cmd_ref.ang_cmd_active[1]) {
 		pitch_err = 0.0f;
 	}
+
 	if (_current_cmd_ref.ang_cmd_active[2]) {
 		yaw_err = 0.0f;
 	}
@@ -419,22 +448,24 @@ void RlMcArmControl::buildObservation(RlToolsAdapter::Observation &observation)
 	for (int i = 0; i < kArmJointDim; ++i) {
 		observation[idx++] = _arm_joint_state.arm_position[i];
 	}
+
 	for (int i = 0; i < kArmJointDim; ++i) {
 		observation[idx++] = _arm_joint_state.arm_velocity[i];
 	}
+
 	for (int i = 0; i < kActionDim; ++i) {
 		observation[idx++] = _prev_action[i];
 	}
 }
 
-void RlMcArmControl::updateActionHistory(const RlToolsAdapter::Action &action)
+void AmPosControl::updateActionHistory(const RlToolsAdapter::Action &action)
 {
 	for (int i = 0; i < kActionDim; ++i) {
 		_prev_action[i] = action[i];
 	}
 }
 
-void RlMcArmControl::applyAction(const RlToolsAdapter::Action &action)
+void AmPosControl::applyAction(const RlToolsAdapter::Action &action)
 {
 	actuator_motors_s actuator_motors{};
 	actuator_motors.timestamp = hrt_absolute_time();
@@ -452,7 +483,7 @@ void RlMcArmControl::applyAction(const RlToolsAdapter::Action &action)
 	_actuator_motors_pub.publish(actuator_motors);
 }
 
-void RlMcArmControl::Run()
+void AmPosControl::Run()
 {
 	if (should_exit()) {
 		_angular_velocity_sub.unregisterCallback();
@@ -481,10 +512,10 @@ void RlMcArmControl::Run()
 	}
 
 	vehicle_status_s vehicle_status{};
-	const bool was_using_rl_mode = _use_rl_mode;
+	const bool was_using_am_mode = _use_am_mode;
 	if (_vehicle_status_sub.updated()) {
 		_vehicle_status_sub.copy(&vehicle_status);
-		_use_rl_mode = vehicle_status.nav_state == _mode_id;
+		_use_am_mode = vehicle_status.nav_state == _mode_id;
 	}
 
 	if (_parameter_update_sub.updated()) {
@@ -496,24 +527,47 @@ void RlMcArmControl::Run()
 		}
 	}
 
-	if (_use_rl_mode && !was_using_rl_mode) {
-		resetHoverLock();
-		resetManualReferenceState();
+	if (_use_am_mode && !was_using_am_mode) {
+		resetCommandReference();
 		_adapter.reset();
 	}
 
-	if (!_use_rl_mode) {
+	if (!_use_am_mode) {
 		perf_end(_loop_perf);
 		return;
 	}
 
 	float dt_s = 0.0f;
 	if (!updateVehicleState(dt_s)) {
+		_adapter.reset();
+		resetCommandReference();
 		perf_end(_loop_perf);
 		return;
 	}
 
-	updateTargets(dt_s);
+	if (!armStateValid()) {
+		_adapter.reset();
+		resetCommandReference();
+		perf_end(_loop_perf);
+		return;
+	}
+
+	_trajectory_setpoint_sub.update(&_trajectory_setpoint);
+
+	if (!trajectorySetpointValid()) {
+		_adapter.reset();
+		resetCommandReference();
+
+		if (hrt_elapsed_time(&_last_setpoint_diag) > 1_s) {
+			_last_setpoint_diag = hrt_absolute_time();
+			PX4_WARN("AM Position waiting for fresh trajectory_setpoint");
+		}
+
+		perf_end(_loop_perf);
+		return;
+	}
+
+	updateTargets();
 
 	RlToolsAdapter::Observation observation{};
 	buildObservation(observation);
@@ -527,9 +581,9 @@ void RlMcArmControl::Run()
 	perf_end(_loop_perf);
 }
 
-int RlMcArmControl::task_spawn(int argc, char *argv[])
+int AmPosControl::task_spawn(int argc, char *argv[])
 {
-	RlMcArmControl *instance = new RlMcArmControl();
+	AmPosControl *instance = new AmPosControl();
 
 	if (instance) {
 		_object.store(instance);
@@ -548,13 +602,18 @@ int RlMcArmControl::task_spawn(int argc, char *argv[])
 	return PX4_ERROR;
 }
 
-int RlMcArmControl::custom_command(int argc, char *argv[])
+int AmPosControl::custom_command(int argc, char *argv[])
 {
 	return print_usage("unknown command");
 }
 
-int RlMcArmControl::print_status()
+int AmPosControl::print_status()
 {
+	_sticks.checkAndUpdateStickInputs();
+	const bool manual_control_available = _sticks.isAvailable();
+	const bool arm_state_valid = armStateValid();
+	const bool trajectory_setpoint_valid = trajectorySetpointValid();
+
 	if (_mode_id == -1) {
 		PX4_INFO("%s registration pending", kModeName);
 
@@ -562,10 +621,17 @@ int RlMcArmControl::print_status()
 		PX4_INFO("%s registered, mode id: %d, arming check id: %d", kModeName, _mode_id, _arming_check_id);
 	}
 
+	PX4_INFO("manual_control_required: %s, manual_control_available: %s",
+		 _param_manual_control.get() != 0 ? "yes" : "no",
+		 manual_control_available ? "yes" : "no");
+	PX4_INFO("arm_state_valid: %s, trajectory_setpoint_valid: %s",
+		 arm_state_valid ? "yes" : "no",
+		 trajectory_setpoint_valid ? "yes" : "no");
+
 	return 0;
 }
 
-int RlMcArmControl::print_usage(const char *reason)
+int AmPosControl::print_usage(const char *reason)
 {
 	if (reason) {
 		PX4_ERR("%s", reason);
@@ -574,19 +640,20 @@ int RlMcArmControl::print_usage(const char *reason)
 	PRINT_MODULE_DESCRIPTION(
 		R"DESCR_STR(
 ### Description
-RL multicopter arm direct-actuator controller.
+AM Position direct-actuator controller.
 
-This module registers a selectable external-mode slot from inside PX4 and
-publishes direct motor commands for a multicopter-with-arm setup.
+This module registers a selectable external mode, consumes trajectory
+setpoints produced by FlightModeManager, and publishes direct motor commands
+for a multicopter-with-arm setup.
 )DESCR_STR");
 
-	PRINT_MODULE_USAGE_NAME("rl_mc_arm_control", "controller");
+	PRINT_MODULE_USAGE_NAME("am_pos_control", "controller");
 	PRINT_MODULE_USAGE_COMMAND("start");
 	PRINT_MODULE_USAGE_DEFAULT_COMMANDS();
 	return 0;
 }
 
-extern "C" __EXPORT int rl_mc_arm_control_main(int argc, char *argv[])
+extern "C" __EXPORT int am_pos_control_main(int argc, char *argv[])
 {
-	return RlMcArmControl::main(argc, argv);
+	return AmPosControl::main(argc, argv);
 }

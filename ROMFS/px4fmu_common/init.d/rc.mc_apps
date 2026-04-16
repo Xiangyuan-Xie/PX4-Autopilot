@@ -42,7 +42,7 @@ then
 	mc_nn_control start
 fi
 
-if param compare -s RL_ARM_EN 1
+if param compare -s AM_POS_EN 1
 then
-	rl_mc_arm_control start
+	am_pos_control start
 fi

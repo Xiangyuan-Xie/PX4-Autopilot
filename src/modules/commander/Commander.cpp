@@ -2600,7 +2600,6 @@ void Commander::control_status_leds(bool changed, const uint8_t battery_warning)
 void Commander::updateControlMode()
 {
 	_vehicle_control_mode = {};
-
 	mode_util::getVehicleControlMode(_vehicle_status.nav_state,
 					 _vehicle_status.vehicle_type, _offboard_control_mode_sub.get(), _vehicle_control_mode);
 	_mode_management.updateControlMode(_vehicle_status.nav_state, _vehicle_control_mode);
@@ -2613,6 +2612,13 @@ void Commander::updateControlMode()
 		    || _vehicle_control_mode.flag_control_position_enabled
 		    || _vehicle_control_mode.flag_control_velocity_enabled
 		    || _vehicle_control_mode.flag_control_acceleration_enabled);
+
+	if (mode_util::isAmPositionControlMode(_vehicle_control_mode)) {
+		// AM Position uses FlightModeManager to generate Position-like setpoints,
+		// but routes them into am_pos_control instead of mc_pos_control.
+		_vehicle_control_mode.flag_multicopter_position_control_enabled = false;
+	}
+
 	_vehicle_control_mode.timestamp = hrt_absolute_time();
 	_vehicle_control_mode_pub.publish(_vehicle_control_mode);
 }
