@@ -18,7 +18,7 @@ constexpr float FlightTaskManualAmPosition::kYawErrorChangeThreshold;
 
 bool FlightTaskManualAmPosition::activate(const trajectory_setpoint_s &last_setpoint)
 {
-	_sticks_data_required = _param_am_pos_manual_control.get() != 0;
+	_sticks_data_required = true;
 
 	const bool ret = FlightTask::activate(last_setpoint);
 	_yaw_setpoint = NAN;
@@ -45,7 +45,7 @@ bool FlightTaskManualAmPosition::activate(const trajectory_setpoint_s &last_setp
 
 bool FlightTaskManualAmPosition::updateInitialize()
 {
-	_sticks_data_required = _param_am_pos_manual_control.get() != 0;
+	_sticks_data_required = true;
 
 	bool ret = FlightTask::updateInitialize();
 	_sticks.checkAndUpdateStickInputs();

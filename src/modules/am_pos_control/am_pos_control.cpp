@@ -169,15 +169,14 @@ void AmPosControl::replyToArmingCheck(int8_t request_id)
 	reply.mode_req_local_position = true;
 	reply.mode_req_attitude = true;
 	reply.mode_req_local_alt = true;
-	reply.mode_req_manual_control = _param_manual_control.get() != 0;
+	reply.mode_req_manual_control = true;
 
 	_arm_joint_state_sub.update(&_arm_joint_state);
 	_sticks.checkAndUpdateStickInputs();
 	const bool manual_control_available = _sticks.isAvailable();
 	const bool arm_state_valid = armStateValid();
 
-	if (reply.mode_req_manual_control && !manual_control_available
-	    && hrt_elapsed_time(&_last_manual_control_diag) > 1_s) {
+	if (!manual_control_available && hrt_elapsed_time(&_last_manual_control_diag) > 1_s) {
 		_last_manual_control_diag = hrt_absolute_time();
 		PX4_WARN("AM Position waiting for manual control input");
 	}
@@ -621,8 +620,7 @@ int AmPosControl::print_status()
 		PX4_INFO("%s registered, mode id: %d, arming check id: %d", kModeName, _mode_id, _arming_check_id);
 	}
 
-	PX4_INFO("manual_control_required: %s, manual_control_available: %s",
-		 _param_manual_control.get() != 0 ? "yes" : "no",
+	PX4_INFO("manual_control_required: yes, manual_control_available: %s",
 		 manual_control_available ? "yes" : "no");
 	PX4_INFO("arm_state_valid: %s, trajectory_setpoint_valid: %s",
 		 arm_state_valid ? "yes" : "no",

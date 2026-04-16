@@ -137,7 +137,6 @@ private:
 	Sticks _sticks{this};
 
 	DEFINE_PARAMETERS(
-		(ParamInt<px4::params::AM_POS_MANL_CTRL>) _param_manual_control,
 		(ParamFloat<px4::params::AMPC_VEL_MANUAL>) _param_ampc_vel_manual,
 		(ParamFloat<px4::params::AMPC_VEL_SIDE>) _param_ampc_vel_side,
 		(ParamFloat<px4::params::AMPC_VEL_BACK>) _param_ampc_vel_back,

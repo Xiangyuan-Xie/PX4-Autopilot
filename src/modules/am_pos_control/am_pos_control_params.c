@@ -15,19 +15,6 @@
 PARAM_DEFINE_INT32(AM_POS_EN, 1);
 
 /**
- * Require a valid manual-control source before entering AM Position.
- *
- * AM Position uses FlightModeManager + FlightTaskManualPosition to generate
- * trajectory_setpoint inputs, so this keeps the mode aligned with Position
- * mode availability requirements.
- *
- * @boolean
- * @reboot_required true
- * @group AM Position
- */
-PARAM_DEFINE_INT32(AM_POS_MANL_CTRL, 0);
-
-/**
  * Maximum horizontal forward manual velocity for AM Position.
  *
  * @unit m/s

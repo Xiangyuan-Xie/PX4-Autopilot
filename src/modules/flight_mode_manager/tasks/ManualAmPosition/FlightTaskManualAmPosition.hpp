@@ -69,7 +69,6 @@ private:
 	AlphaFilter<float> _yaw_error_lpf{kYawErrorTimeConstant};
 
 	DEFINE_PARAMETERS_CUSTOM_PARENT(FlightTask,
-					(ParamInt<px4::params::AM_POS_MANL_CTRL>) _param_am_pos_manual_control,
 					(ParamFloat<px4::params::AMPC_VEL_MANUAL>) _param_ampc_vel_manual,
 					(ParamFloat<px4::params::AMPC_VEL_SIDE>) _param_ampc_vel_side,
 					(ParamFloat<px4::params::AMPC_VEL_BACK>) _param_ampc_vel_back,
