@@ -23,6 +23,7 @@
 #include <uORB/topics/arm_joint_state.h>
 #include <uORB/topics/arming_check_reply.h>
 #include <uORB/topics/arming_check_request.h>
+#include <uORB/topics/offboard_control_mode.h>
 #include <uORB/topics/parameter_update.h>
 #include <uORB/topics/register_ext_component_reply.h>
 #include <uORB/topics/register_ext_component_request.h>
@@ -60,6 +61,26 @@ private:
 	static constexpr hrt_abstime kArmStateTimeout = 200_ms;
 	static constexpr hrt_abstime kTrajectorySetpointTimeout = 200_ms;
 
+	enum class ActiveMode : uint8_t {
+		None = 0,
+		Manual,
+		Offboard
+	};
+
+	struct RegisteredMode {
+		RegisteredMode(const char *mode_name, uint64_t request_id_, bool replace_offboard_)
+			: name(mode_name), request_id(request_id_), replace_offboard(replace_offboard_) {}
+
+		const char *name;
+		uint64_t request_id;
+		bool replace_offboard;
+		int8_t arming_check_id{-1};
+		int8_t mode_id{-1};
+		bool registration_requested{false};
+
+		bool registered() const { return mode_id >= 0 && arming_check_id >= 0; }
+	};
+
 	struct CommandReference {
 		matrix::Vector3f desired_lin_vel_b{};
 		matrix::Vector3f desired_ang_vel_b{};
@@ -72,10 +93,10 @@ private:
 	};
 
 	void Run() override;
-	void registerMode();
-	void unregisterMode();
-	void configureMode(int8_t mode_id);
-	void replyToArmingCheck(int8_t request_id);
+	void registerMode(RegisteredMode &mode);
+	void unregisterMode(RegisteredMode &mode);
+	void configureMode(const RegisteredMode &mode);
+	void replyToArmingCheck(const RegisteredMode &mode, uint8_t request_id);
 	void checkModeRegistration();
 	void updateTargets();
 	void buildObservation(RlToolsAdapter::Observation &observation);
@@ -91,10 +112,15 @@ private:
 	bool attitudeValid() const;
 	bool angularVelocityValid() const;
 	bool trajectorySetpointValid() const;
+	bool offboardControlModeFresh() const;
+	bool offboardControlModeSupported() const;
+	bool offboardControlModeValid() const;
+	ActiveMode activeMode();
 
 	uORB::SubscriptionInterval _parameter_update_sub{ORB_ID(parameter_update), 1_s};
 	uORB::Subscription _register_ext_component_reply_sub{ORB_ID(register_ext_component_reply)};
 	uORB::Subscription _arming_check_request_sub{ORB_ID(arming_check_request)};
+	uORB::Subscription _offboard_control_mode_sub{ORB_ID(offboard_control_mode)};
 	uORB::Subscription _vehicle_status_sub{ORB_ID(vehicle_status)};
 	uORB::Subscription _position_sub{ORB_ID(vehicle_local_position)};
 	uORB::Subscription _trajectory_setpoint_sub{ORB_ID(trajectory_setpoint)};
@@ -112,14 +138,14 @@ private:
 	hrt_abstime _last_run{0};
 	hrt_abstime _last_arm_state_diag{0};
 	hrt_abstime _last_manual_control_diag{0};
+	hrt_abstime _last_offboard_diag{0};
 	hrt_abstime _last_setpoint_diag{0};
-	uint8_t _mode_request_id{77};
-	int8_t _arming_check_id{-1};
-	int8_t _mode_id{-1};
-	bool _sent_mode_registration{false};
+	RegisteredMode _manual_mode;
+	RegisteredMode _offboard_mode;
 	bool _use_am_mode{false};
 	CommandReference _current_cmd_ref{};
 
+	offboard_control_mode_s _offboard_control_mode{};
 	trajectory_setpoint_s _trajectory_setpoint{};
 	vehicle_angular_velocity_s _angular_velocity{};
 	vehicle_local_position_s _position{};
@@ -146,6 +172,8 @@ private:
 		(ParamFloat<px4::params::AMPC_MAN_Y_TAU>) _param_ampc_man_y_tau,
 		(ParamFloat<px4::params::AMPC_MAN_DZ>) _param_ampc_man_dz,
 		(ParamFloat<px4::params::AMPC_HOLD_MAX_Z>) _param_ampc_hold_max_z,
-		(ParamFloat<px4::params::AMPC_HOLD_MAX_XY>) _param_ampc_hold_max_xy
+		(ParamFloat<px4::params::AMPC_HOLD_MAX_XY>) _param_ampc_hold_max_xy,
+		(ParamBool<px4::params::AMPC_OFFB_EN>) _param_ampc_offb_en,
+		(ParamFloat<px4::params::COM_OF_LOSS_T>) _param_com_of_loss_t
 	)
 };

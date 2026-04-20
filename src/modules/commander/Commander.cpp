@@ -2613,9 +2613,10 @@ void Commander::updateControlMode()
 		    || _vehicle_control_mode.flag_control_velocity_enabled
 		    || _vehicle_control_mode.flag_control_acceleration_enabled);
 
-	if (mode_util::isAmPositionControlMode(_vehicle_control_mode)) {
+	if (mode_util::isAnyAmPositionControlMode(_vehicle_control_mode)) {
 		// AM Position uses FlightModeManager to generate Position-like setpoints,
-		// but routes them into am_pos_control instead of mc_pos_control.
+		// or consumes external offboard setpoints, and routes both variants into
+		// am_pos_control instead of mc_pos_control.
 		_vehicle_control_mode.flag_multicopter_position_control_enabled = false;
 	}
 

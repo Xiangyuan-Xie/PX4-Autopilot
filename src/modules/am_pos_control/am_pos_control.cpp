@@ -11,7 +11,8 @@
 
 namespace
 {
-constexpr char kModeName[] = "AM Position";
+constexpr char kManualModeName[] = "AM Position";
+constexpr char kOffboardModeName[] = "Offboard";
 const matrix::Vector3f kGravityEnu{0.0f, 0.0f, -1.0f};
 constexpr float kHalfSqrt2 = 0.7071067811865476f;
 
@@ -59,7 +60,9 @@ float yawNedToEnu(float yaw_ned_rad)
 AmPosControl::AmPosControl() :
 	ModuleParams(nullptr),
 	WorkItem(MODULE_NAME, px4::wq_configurations::nav_and_controllers),
-	_loop_perf(perf_alloc(PC_ELAPSED, MODULE_NAME": cycle"))
+	_loop_perf(perf_alloc(PC_ELAPSED, MODULE_NAME": cycle")),
+	_manual_mode(kManualModeName, 77, false),
+	_offboard_mode(kOffboardModeName, 78, true)
 {
 	resetState();
 }
@@ -109,40 +112,50 @@ bool AmPosControl::anyAxisActive(const bool axes[3]) const
 	return axes[0] || axes[1] || axes[2];
 }
 
-void AmPosControl::registerMode()
+void AmPosControl::registerMode(RegisteredMode &mode)
 {
 	register_ext_component_request_s request{};
 	request.timestamp = hrt_absolute_time();
-	strncpy(request.name, kModeName, sizeof(request.name) - 1);
-	request.request_id = _mode_request_id;
+	strncpy(request.name, mode.name, sizeof(request.name) - 1);
+	request.request_id = mode.request_id;
 	request.px4_ros2_api_version = 1;
 	request.register_arming_check = true;
 	request.register_mode = true;
+
+	if (mode.replace_offboard) {
+		request.enable_replace_internal_mode = true;
+		request.replace_internal_mode = vehicle_status_s::NAVIGATION_STATE_OFFBOARD;
+	}
+
 	_register_ext_component_request_pub.publish(request);
 }
 
-void AmPosControl::unregisterMode()
+void AmPosControl::unregisterMode(RegisteredMode &mode)
 {
-	if (_mode_id < 0) {
+	if (!mode.registered()) {
 		return;
 	}
 
 	unregister_ext_component_s request{};
 	request.timestamp = hrt_absolute_time();
-	strncpy(request.name, kModeName, sizeof(request.name) - 1);
-	request.arming_check_id = _arming_check_id;
-	request.mode_id = _mode_id;
+	strncpy(request.name, mode.name, sizeof(request.name) - 1);
+	request.arming_check_id = mode.arming_check_id;
+	request.mode_id = mode.mode_id;
 	_unregister_ext_component_pub.publish(request);
+
+	mode.arming_check_id = -1;
+	mode.mode_id = -1;
+	mode.registration_requested = false;
 }
 
-void AmPosControl::configureMode(int8_t mode_id)
+void AmPosControl::configureMode(const RegisteredMode &mode)
 {
 	vehicle_control_mode_s config{};
 	config.timestamp = hrt_absolute_time();
-	config.source_id = mode_id;
+	config.source_id = mode.mode_id;
 	config.flag_multicopter_position_control_enabled = false;
-	config.flag_control_manual_enabled = true;
-	config.flag_control_offboard_enabled = false;
+	config.flag_control_manual_enabled = !mode.replace_offboard;
+	config.flag_control_offboard_enabled = mode.replace_offboard;
 	config.flag_control_auto_enabled = false;
 	config.flag_control_position_enabled = true;
 	config.flag_control_velocity_enabled = true;
@@ -156,12 +169,12 @@ void AmPosControl::configureMode(int8_t mode_id)
 	_config_control_setpoints_pub.publish(config);
 }
 
-void AmPosControl::replyToArmingCheck(int8_t request_id)
+void AmPosControl::replyToArmingCheck(const RegisteredMode &mode, uint8_t request_id)
 {
 	arming_check_reply_s reply{};
 	reply.timestamp = hrt_absolute_time();
 	reply.request_id = request_id;
-	reply.registration_id = _arming_check_id;
+	reply.registration_id = mode.arming_check_id;
 	reply.health_component_index = reply.HEALTH_COMPONENT_INDEX_NONE;
 	reply.num_events = 0;
 	reply.can_arm_and_run = true;
@@ -169,16 +182,29 @@ void AmPosControl::replyToArmingCheck(int8_t request_id)
 	reply.mode_req_local_position = true;
 	reply.mode_req_attitude = true;
 	reply.mode_req_local_alt = true;
-	reply.mode_req_manual_control = true;
+	reply.mode_req_manual_control = !mode.replace_offboard;
 
 	_arm_joint_state_sub.update(&_arm_joint_state);
-	_sticks.checkAndUpdateStickInputs();
-	const bool manual_control_available = _sticks.isAvailable();
+	_offboard_control_mode_sub.update(&_offboard_control_mode);
 	const bool arm_state_valid = armStateValid();
 
-	if (!manual_control_available && hrt_elapsed_time(&_last_manual_control_diag) > 1_s) {
-		_last_manual_control_diag = hrt_absolute_time();
-		PX4_WARN("AM Position waiting for manual control input");
+	if (!mode.replace_offboard) {
+		_sticks.checkAndUpdateStickInputs();
+		const bool manual_control_available = _sticks.isAvailable();
+
+		if (!manual_control_available && hrt_elapsed_time(&_last_manual_control_diag) > 1_s) {
+			_last_manual_control_diag = hrt_absolute_time();
+			PX4_WARN("AM Position waiting for manual control input");
+		}
+	}
+
+	if (mode.replace_offboard && !offboardControlModeValid()) {
+		reply.can_arm_and_run = false;
+
+		if (hrt_elapsed_time(&_last_offboard_diag) > 1_s) {
+			_last_offboard_diag = hrt_absolute_time();
+			PX4_WARN("AM Position Offboard requires fresh supported offboard_control_mode");
+		}
 	}
 
 	if (!arm_state_valid) {
@@ -199,21 +225,28 @@ void AmPosControl::checkModeRegistration()
 	int tries = reply.ORB_QUEUE_LENGTH;
 
 	while (_register_ext_component_reply_sub.update(&reply) && --tries >= 0) {
-		if (reply.request_id != _mode_request_id) {
+		RegisteredMode *mode = nullptr;
+
+		if (reply.request_id == _manual_mode.request_id) {
+			mode = &_manual_mode;
+
+		} else if (reply.request_id == _offboard_mode.request_id) {
+			mode = &_offboard_mode;
+		}
+
+		if (!mode) {
 			continue;
 		}
 
 		if (reply.success) {
-			_arming_check_id = reply.arming_check_id;
-			_mode_id = reply.mode_id;
-			configureMode(_mode_id);
-			PX4_INFO("%s registered, mode id: %d", kModeName, _mode_id);
+			mode->arming_check_id = reply.arming_check_id;
+			mode->mode_id = reply.mode_id;
+			configureMode(*mode);
+			PX4_INFO("%s registered, mode id: %d", mode->name, mode->mode_id);
 
 		} else {
-			PX4_ERR("%s registration failed", kModeName);
+			PX4_ERR("%s registration failed", mode->name);
 		}
-
-		break;
 	}
 }
 
@@ -310,6 +343,44 @@ bool AmPosControl::trajectorySetpointValid() const
 	       || PX4_ISFINITE(_trajectory_setpoint.position[2]) || PX4_ISFINITE(_trajectory_setpoint.velocity[0])
 	       || PX4_ISFINITE(_trajectory_setpoint.velocity[1]) || PX4_ISFINITE(_trajectory_setpoint.velocity[2])
 	       || PX4_ISFINITE(_trajectory_setpoint.yaw) || PX4_ISFINITE(_trajectory_setpoint.yawspeed);
+}
+
+bool AmPosControl::offboardControlModeFresh() const
+{
+	const hrt_abstime now = hrt_absolute_time();
+	const hrt_abstime timeout = static_cast<hrt_abstime>(_param_com_of_loss_t.get() * 1_s);
+	return (_offboard_control_mode.timestamp != 0) && (now <= _offboard_control_mode.timestamp + timeout);
+}
+
+bool AmPosControl::offboardControlModeSupported() const
+{
+	const bool position_or_velocity = _offboard_control_mode.position || _offboard_control_mode.velocity;
+	const bool unsupported = _offboard_control_mode.acceleration || _offboard_control_mode.attitude
+				 || _offboard_control_mode.body_rate || _offboard_control_mode.thrust_and_torque
+				 || _offboard_control_mode.direct_actuator;
+	return position_or_velocity && !unsupported;
+}
+
+bool AmPosControl::offboardControlModeValid() const
+{
+	return offboardControlModeFresh() && offboardControlModeSupported();
+}
+
+AmPosControl::ActiveMode AmPosControl::activeMode()
+{
+	vehicle_status_s vehicle_status{};
+
+	if (_vehicle_status_sub.copy(&vehicle_status)) {
+		if (_manual_mode.registered() && vehicle_status.nav_state == _manual_mode.mode_id) {
+			return ActiveMode::Manual;
+		}
+
+		if (_offboard_mode.registered() && vehicle_status.nav_state == _offboard_mode.mode_id) {
+			return ActiveMode::Offboard;
+		}
+	}
+
+	return ActiveMode::None;
 }
 
 void AmPosControl::updateConvertedState()
@@ -486,43 +557,60 @@ void AmPosControl::Run()
 {
 	if (should_exit()) {
 		_angular_velocity_sub.unregisterCallback();
-		unregisterMode();
+		unregisterMode(_manual_mode);
+		unregisterMode(_offboard_mode);
 		exit_and_cleanup();
 		return;
 	}
 
-	if (!_sent_mode_registration) {
-		registerMode();
-		_sent_mode_registration = true;
+	if (!_manual_mode.registration_requested) {
+		registerMode(_manual_mode);
+		_manual_mode.registration_requested = true;
 		return;
 	}
 
-	if (_mode_id == -1 || _arming_check_id == -1) {
-		checkModeRegistration();
+	if (_param_ampc_offb_en.get() && !_offboard_mode.registration_requested) {
+		registerMode(_offboard_mode);
+		_offboard_mode.registration_requested = true;
 		return;
 	}
 
 	perf_begin(_loop_perf);
 
-	if (_arming_check_id >= 0 && _arming_check_request_sub.updated()) {
+	checkModeRegistration();
+
+	if (_arming_check_request_sub.updated()) {
 		arming_check_request_s arming_check_request{};
 		_arming_check_request_sub.copy(&arming_check_request);
-		replyToArmingCheck(arming_check_request.request_id);
+
+		if (_manual_mode.registered()) {
+			replyToArmingCheck(_manual_mode, arming_check_request.request_id);
+		}
+
+		if (_offboard_mode.registered()) {
+			replyToArmingCheck(_offboard_mode, arming_check_request.request_id);
+		}
 	}
 
 	vehicle_status_s vehicle_status{};
 	const bool was_using_am_mode = _use_am_mode;
 	if (_vehicle_status_sub.updated()) {
 		_vehicle_status_sub.copy(&vehicle_status);
-		_use_am_mode = vehicle_status.nav_state == _mode_id;
+		_use_am_mode = (_manual_mode.registered() && vehicle_status.nav_state == _manual_mode.mode_id)
+			       || (_offboard_mode.registered() && vehicle_status.nav_state == _offboard_mode.mode_id);
 	}
 
 	if (_parameter_update_sub.updated()) {
 		parameter_update_s param_update{};
 		_parameter_update_sub.copy(&param_update);
 		updateParams();
-		if (_mode_id >= 0) {
-			configureMode(_mode_id);
+
+		if (_manual_mode.registered()) {
+			configureMode(_manual_mode);
+		}
+
+		if (_offboard_mode.registered()) {
+			configureMode(_offboard_mode);
 		}
 	}
 
@@ -534,6 +622,23 @@ void AmPosControl::Run()
 	if (!_use_am_mode) {
 		perf_end(_loop_perf);
 		return;
+	}
+
+	if (activeMode() == ActiveMode::Offboard) {
+		_offboard_control_mode_sub.update(&_offboard_control_mode);
+
+		if (!offboardControlModeValid()) {
+			_adapter.reset();
+			resetCommandReference();
+
+			if (hrt_elapsed_time(&_last_offboard_diag) > 1_s) {
+				_last_offboard_diag = hrt_absolute_time();
+				PX4_WARN("AM Position Offboard waiting for supported offboard_control_mode");
+			}
+
+			perf_end(_loop_perf);
+			return;
+		}
 	}
 
 	float dt_s = 0.0f;
@@ -612,16 +717,31 @@ int AmPosControl::print_status()
 	const bool manual_control_available = _sticks.isAvailable();
 	const bool arm_state_valid = armStateValid();
 	const bool trajectory_setpoint_valid = trajectorySetpointValid();
+	_offboard_control_mode_sub.update(&_offboard_control_mode);
 
-	if (_mode_id == -1) {
-		PX4_INFO("%s registration pending", kModeName);
+	if (!_manual_mode.registered()) {
+		PX4_INFO("%s registration pending", _manual_mode.name);
 
 	} else {
-		PX4_INFO("%s registered, mode id: %d, arming check id: %d", kModeName, _mode_id, _arming_check_id);
+		PX4_INFO("%s registered, mode id: %d, arming check id: %d",
+			 _manual_mode.name, _manual_mode.mode_id, _manual_mode.arming_check_id);
 	}
 
-	PX4_INFO("manual_control_required: yes, manual_control_available: %s",
+	if (_param_ampc_offb_en.get()) {
+		if (!_offboard_mode.registered()) {
+			PX4_INFO("%s replacement registration pending", _offboard_mode.name);
+
+		} else {
+			PX4_INFO("%s replacement registered, mode id: %d, arming check id: %d",
+				 _offboard_mode.name, _offboard_mode.mode_id, _offboard_mode.arming_check_id);
+		}
+	}
+
+	const bool manual_control_required = activeMode() != ActiveMode::Offboard;
+	PX4_INFO("manual_control_required: %s, manual_control_available: %s",
+		 manual_control_required ? "yes" : "no",
 		 manual_control_available ? "yes" : "no");
+	PX4_INFO("offboard_control_mode_valid: %s", offboardControlModeValid() ? "yes" : "no");
 	PX4_INFO("arm_state_valid: %s, trajectory_setpoint_valid: %s",
 		 arm_state_valid ? "yes" : "no",
 		 trajectory_setpoint_valid ? "yes" : "no");
@@ -640,9 +760,9 @@ int AmPosControl::print_usage(const char *reason)
 ### Description
 AM Position direct-actuator controller.
 
-This module registers a selectable external mode, consumes trajectory
-setpoints produced by FlightModeManager, and publishes direct motor commands
-for a multicopter-with-arm setup.
+This module registers a selectable AM Position mode and can optionally
+replace the internal Offboard mode. It consumes trajectory setpoints and
+publishes direct motor commands for a multicopter-with-arm setup.
 )DESCR_STR");
 
 	PRINT_MODULE_USAGE_NAME("am_pos_control", "controller");

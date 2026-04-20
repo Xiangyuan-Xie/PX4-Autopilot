@@ -202,4 +202,21 @@ bool isAmPositionControlMode(const vehicle_control_mode_s &vehicle_control_mode)
 	       && vehicle_control_mode.flag_control_termination_enabled;
 }
 
+bool isAnyAmPositionControlMode(const vehicle_control_mode_s &vehicle_control_mode)
+{
+	const bool matches_am_position_shape = !vehicle_control_mode.flag_control_auto_enabled
+					       && vehicle_control_mode.flag_control_position_enabled
+					       && vehicle_control_mode.flag_control_velocity_enabled
+					       && vehicle_control_mode.flag_control_altitude_enabled
+					       && vehicle_control_mode.flag_control_climb_rate_enabled
+					       && !vehicle_control_mode.flag_control_acceleration_enabled
+					       && !vehicle_control_mode.flag_control_attitude_enabled
+					       && !vehicle_control_mode.flag_control_rates_enabled
+					       && !vehicle_control_mode.flag_control_allocation_enabled
+					       && vehicle_control_mode.flag_control_termination_enabled;
+
+	return matches_am_position_shape
+	       && (vehicle_control_mode.flag_control_manual_enabled != vehicle_control_mode.flag_control_offboard_enabled);
+}
+
 } // namespace mode_util

@@ -15,6 +15,24 @@
 PARAM_DEFINE_INT32(AM_POS_EN, 1);
 
 /**
+ * Replace the internal Offboard mode with AM Position.
+ *
+ * When enabled, selecting the standard Offboard mode enters the AM Position
+ * direct-actuator implementation instead of the default PX4 offboard control
+ * stack after reboot.
+ *
+ * This replacement only supports position/velocity-style Offboard inputs via
+ * OffboardControlMode and TrajectorySetpoint. Acceleration, attitude,
+ * body-rate, thrust/torque and direct-actuator Offboard inputs are not
+ * supported by the AM Position replacement path.
+ *
+ * @reboot_required true
+ * @boolean
+ * @group AM Position
+ */
+PARAM_DEFINE_INT32(AMPC_OFFB_EN, 0);
+
+/**
  * Maximum horizontal forward manual velocity for AM Position.
  *
  * @unit m/s

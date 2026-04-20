@@ -46,5 +46,6 @@ void getVehicleControlMode(uint8_t nav_state, uint8_t vehicle_type,
 			   vehicle_control_mode_s &vehicle_control_mode);
 
 bool isAmPositionControlMode(const vehicle_control_mode_s &vehicle_control_mode);
+bool isAnyAmPositionControlMode(const vehicle_control_mode_s &vehicle_control_mode);
 
 } // namespace mode_util

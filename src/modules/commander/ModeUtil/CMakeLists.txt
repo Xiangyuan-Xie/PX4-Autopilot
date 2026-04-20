@@ -36,3 +36,5 @@ add_library(mode_util
 	mode_requirements.cpp
 )
 add_dependencies(mode_util uorb_headers prebuild_targets)
+
+px4_add_unit_gtest(SRC control_mode_test.cpp LINKLIBS mode_util)
