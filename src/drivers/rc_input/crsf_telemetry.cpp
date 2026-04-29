@@ -149,6 +149,10 @@ bool CRSFTelemetry::send_flight_mode()
 		flight_mode = "Position";
 		break;
 
+	case vehicle_status_s::NAVIGATION_STATE_AM_POSITION:
+		flight_mode = "AM Position";
+		break;
+
 	case vehicle_status_s::NAVIGATION_STATE_AUTO_RTL:
 		flight_mode = "Return";
 		break;
@@ -176,6 +180,10 @@ bool CRSFTelemetry::send_flight_mode()
 
 	case vehicle_status_s::NAVIGATION_STATE_OFFBOARD:
 		flight_mode = "Offboard";
+		break;
+
+	case vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD:
+		flight_mode = "AM Offboard";
 		break;
 
 	case vehicle_status_s::NAVIGATION_STATE_STAB:

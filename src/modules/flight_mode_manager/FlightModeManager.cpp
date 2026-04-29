@@ -140,7 +140,7 @@ void FlightModeManager::start_flight_task()
 	const uint8_t nav_state = _vehicle_status_sub.get().nav_state;
 	const bool external_nav_state = nav_state >= vehicle_status_s::NAVIGATION_STATE_EXTERNAL1
 				       && nav_state <= vehicle_status_s::NAVIGATION_STATE_EXTERNAL8;
-	const bool am_position_mode = external_nav_state
+	const bool am_position_mode = nav_state == vehicle_status_s::NAVIGATION_STATE_AM_POSITION
 				      && mode_util::isAmPositionControlMode(_vehicle_control_mode_sub.get());
 
 	// Do not run any flight task for VTOLs in fixed-wing mode
@@ -159,7 +159,7 @@ void FlightModeManager::start_flight_task()
 	bool matching_task_running = true;
 	bool task_failure = false;
 	const bool nav_state_descend = (nav_state == vehicle_status_s::NAVIGATION_STATE_DESCEND);
-	if (external_nav_state && !am_position_mode) {
+	if (nav_state == vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD || external_nav_state) {
 		switchTask(FlightTaskIndex::None);
 		return;
 	}
@@ -213,11 +213,19 @@ void FlightModeManager::start_flight_task()
 		task_failure = error != FlightTaskError::NoError;
 	}
 
-	if (am_position_mode) {
-		found_some_task = true;
+	if (nav_state == vehicle_status_s::NAVIGATION_STATE_AM_POSITION) {
+		if (!am_position_mode) {
+			switchTask(FlightTaskIndex::None);
+			return;
+		}
+
 		FlightTaskError error = switchTask(FlightTaskIndex::ManualAmPosition);
-		task_failure = error != FlightTaskError::NoError;
-		matching_task_running = matching_task_running && !task_failure;
+
+		if (error != FlightTaskError::NoError) {
+			switchTask(FlightTaskIndex::None);
+		}
+
+		return;
 	}
 
 	// Manual position control

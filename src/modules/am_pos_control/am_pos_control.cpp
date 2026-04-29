@@ -11,8 +11,6 @@
 
 namespace
 {
-constexpr char kManualModeName[] = "AM Position";
-constexpr char kOffboardModeName[] = "Offboard";
 const matrix::Vector3f kGravityEnu{0.0f, 0.0f, -1.0f};
 constexpr float kHalfSqrt2 = 0.7071067811865476f;
 
@@ -60,9 +58,7 @@ float yawNedToEnu(float yaw_ned_rad)
 AmPosControl::AmPosControl() :
 	ModuleParams(nullptr),
 	WorkItem(MODULE_NAME, px4::wq_configurations::nav_and_controllers),
-	_loop_perf(perf_alloc(PC_ELAPSED, MODULE_NAME": cycle")),
-	_manual_mode(kManualModeName, 77, false),
-	_offboard_mode(kOffboardModeName, 78, true)
+	_loop_perf(perf_alloc(PC_ELAPSED, MODULE_NAME": cycle"))
 {
 	resetState();
 }
@@ -110,144 +106,6 @@ void AmPosControl::resetState()
 bool AmPosControl::anyAxisActive(const bool axes[3]) const
 {
 	return axes[0] || axes[1] || axes[2];
-}
-
-void AmPosControl::registerMode(RegisteredMode &mode)
-{
-	register_ext_component_request_s request{};
-	request.timestamp = hrt_absolute_time();
-	strncpy(request.name, mode.name, sizeof(request.name) - 1);
-	request.request_id = mode.request_id;
-	request.px4_ros2_api_version = 1;
-	request.register_arming_check = true;
-	request.register_mode = true;
-
-	if (mode.replace_offboard) {
-		request.enable_replace_internal_mode = true;
-		request.replace_internal_mode = vehicle_status_s::NAVIGATION_STATE_OFFBOARD;
-	}
-
-	_register_ext_component_request_pub.publish(request);
-}
-
-void AmPosControl::unregisterMode(RegisteredMode &mode)
-{
-	if (!mode.registered()) {
-		return;
-	}
-
-	unregister_ext_component_s request{};
-	request.timestamp = hrt_absolute_time();
-	strncpy(request.name, mode.name, sizeof(request.name) - 1);
-	request.arming_check_id = mode.arming_check_id;
-	request.mode_id = mode.mode_id;
-	_unregister_ext_component_pub.publish(request);
-
-	mode.arming_check_id = -1;
-	mode.mode_id = -1;
-	mode.registration_requested = false;
-}
-
-void AmPosControl::configureMode(const RegisteredMode &mode)
-{
-	vehicle_control_mode_s config{};
-	config.timestamp = hrt_absolute_time();
-	config.source_id = mode.mode_id;
-	config.flag_multicopter_position_control_enabled = false;
-	config.flag_control_manual_enabled = !mode.replace_offboard;
-	config.flag_control_offboard_enabled = mode.replace_offboard;
-	config.flag_control_auto_enabled = false;
-	config.flag_control_position_enabled = true;
-	config.flag_control_velocity_enabled = true;
-	config.flag_control_altitude_enabled = true;
-	config.flag_control_climb_rate_enabled = true;
-	config.flag_control_acceleration_enabled = false;
-	config.flag_control_attitude_enabled = false;
-	config.flag_control_rates_enabled = false;
-	config.flag_control_allocation_enabled = false;
-	config.flag_control_termination_enabled = true;
-	_config_control_setpoints_pub.publish(config);
-}
-
-void AmPosControl::replyToArmingCheck(const RegisteredMode &mode, uint8_t request_id)
-{
-	arming_check_reply_s reply{};
-	reply.timestamp = hrt_absolute_time();
-	reply.request_id = request_id;
-	reply.registration_id = mode.arming_check_id;
-	reply.health_component_index = reply.HEALTH_COMPONENT_INDEX_NONE;
-	reply.num_events = 0;
-	reply.can_arm_and_run = true;
-	reply.mode_req_angular_velocity = true;
-	reply.mode_req_local_position = true;
-	reply.mode_req_attitude = true;
-	reply.mode_req_local_alt = true;
-	reply.mode_req_manual_control = !mode.replace_offboard;
-
-	_arm_joint_state_sub.update(&_arm_joint_state);
-	_offboard_control_mode_sub.update(&_offboard_control_mode);
-	const bool arm_state_valid = armStateValid();
-
-	if (!mode.replace_offboard) {
-		_sticks.checkAndUpdateStickInputs();
-		const bool manual_control_available = _sticks.isAvailable();
-
-		if (!manual_control_available && hrt_elapsed_time(&_last_manual_control_diag) > 1_s) {
-			_last_manual_control_diag = hrt_absolute_time();
-			PX4_WARN("AM Position waiting for manual control input");
-		}
-	}
-
-	if (mode.replace_offboard && !offboardControlModeValid()) {
-		reply.can_arm_and_run = false;
-
-		if (hrt_elapsed_time(&_last_offboard_diag) > 1_s) {
-			_last_offboard_diag = hrt_absolute_time();
-			PX4_WARN("AM Position Offboard requires fresh supported offboard_control_mode");
-		}
-	}
-
-	if (!arm_state_valid) {
-		reply.can_arm_and_run = false;
-
-		if (hrt_elapsed_time(&_last_arm_state_diag) > 1_s) {
-			_last_arm_state_diag = hrt_absolute_time();
-			PX4_WARN("AM Position cannot run: arm_joint_state invalid or stale");
-		}
-	}
-
-	_arming_check_reply_pub.publish(reply);
-}
-
-void AmPosControl::checkModeRegistration()
-{
-	register_ext_component_reply_s reply{};
-	int tries = reply.ORB_QUEUE_LENGTH;
-
-	while (_register_ext_component_reply_sub.update(&reply) && --tries >= 0) {
-		RegisteredMode *mode = nullptr;
-
-		if (reply.request_id == _manual_mode.request_id) {
-			mode = &_manual_mode;
-
-		} else if (reply.request_id == _offboard_mode.request_id) {
-			mode = &_offboard_mode;
-		}
-
-		if (!mode) {
-			continue;
-		}
-
-		if (reply.success) {
-			mode->arming_check_id = reply.arming_check_id;
-			mode->mode_id = reply.mode_id;
-			configureMode(*mode);
-			PX4_INFO("%s registered, mode id: %d", mode->name, mode->mode_id);
-
-		} else {
-			PX4_ERR("%s registration failed", mode->name);
-		}
-	}
 }
 
 bool AmPosControl::updateVehicleState(float &dt_s)
@@ -333,16 +191,44 @@ bool AmPosControl::armStateValid() const
 
 bool AmPosControl::trajectorySetpointValid() const
 {
+	return trajectorySetpointFresh() && trajectorySetpointHasLinearInput();
+}
+
+bool AmPosControl::trajectorySetpointFresh() const
+{
 	const hrt_abstime now = hrt_absolute_time();
 
 	if ((_trajectory_setpoint.timestamp == 0) || (now > _trajectory_setpoint.timestamp + kTrajectorySetpointTimeout)) {
 		return false;
 	}
 
+	return true;
+}
+
+bool AmPosControl::trajectorySetpointHasLinearInput() const
+{
 	return PX4_ISFINITE(_trajectory_setpoint.position[0]) || PX4_ISFINITE(_trajectory_setpoint.position[1])
 	       || PX4_ISFINITE(_trajectory_setpoint.position[2]) || PX4_ISFINITE(_trajectory_setpoint.velocity[0])
-	       || PX4_ISFINITE(_trajectory_setpoint.velocity[1]) || PX4_ISFINITE(_trajectory_setpoint.velocity[2])
-	       || PX4_ISFINITE(_trajectory_setpoint.yaw) || PX4_ISFINITE(_trajectory_setpoint.yawspeed);
+	       || PX4_ISFINITE(_trajectory_setpoint.velocity[1]) || PX4_ISFINITE(_trajectory_setpoint.velocity[2]);
+}
+
+bool AmPosControl::offboardTrajectorySetpointValid() const
+{
+	if (!trajectorySetpointFresh()) {
+		return false;
+	}
+
+	if (_offboard_control_mode.position) {
+		return PX4_ISFINITE(_trajectory_setpoint.position[0]) || PX4_ISFINITE(_trajectory_setpoint.position[1])
+		       || PX4_ISFINITE(_trajectory_setpoint.position[2]);
+	}
+
+	if (_offboard_control_mode.velocity) {
+		return PX4_ISFINITE(_trajectory_setpoint.velocity[0]) || PX4_ISFINITE(_trajectory_setpoint.velocity[1])
+		       || PX4_ISFINITE(_trajectory_setpoint.velocity[2]);
+	}
+
+	return false;
 }
 
 bool AmPosControl::offboardControlModeFresh() const
@@ -366,21 +252,47 @@ bool AmPosControl::offboardControlModeValid() const
 	return offboardControlModeFresh() && offboardControlModeSupported();
 }
 
+bool AmPosControl::manualControlAvailable()
+{
+	_sticks.checkAndUpdateStickInputs();
+	return _sticks.isAvailable();
+}
+
 AmPosControl::ActiveMode AmPosControl::activeMode()
 {
 	vehicle_status_s vehicle_status{};
 
 	if (_vehicle_status_sub.copy(&vehicle_status)) {
-		if (_manual_mode.registered() && vehicle_status.nav_state == _manual_mode.mode_id) {
+		if (vehicle_status.nav_state == vehicle_status_s::NAVIGATION_STATE_AM_POSITION) {
 			return ActiveMode::Manual;
 		}
 
-		if (_offboard_mode.registered() && vehicle_status.nav_state == _offboard_mode.mode_id) {
+		if (vehicle_status.nav_state == vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD) {
 			return ActiveMode::Offboard;
 		}
 	}
 
 	return ActiveMode::None;
+}
+
+void AmPosControl::publishStatus()
+{
+	_offboard_control_mode_sub.update(&_offboard_control_mode);
+	_arm_joint_state_sub.update(&_arm_joint_state);
+	_trajectory_setpoint_sub.update(&_trajectory_setpoint);
+
+	am_pos_control_status_s status{};
+	status.timestamp = hrt_absolute_time();
+	status.module_running = true;
+	status.manual_control_available = manualControlAvailable();
+	status.arm_state_valid = armStateValid();
+	status.trajectory_setpoint_valid = trajectorySetpointValid();
+	status.offboard_control_mode_fresh = offboardControlModeFresh();
+	status.offboard_control_mode_supported = offboardControlModeSupported();
+	status.am_position_available = status.manual_control_available && status.arm_state_valid;
+	status.am_offboard_available = status.arm_state_valid && status.offboard_control_mode_fresh
+				       && status.offboard_control_mode_supported && offboardTrajectorySetpointValid();
+	_status_pub.publish(status);
 }
 
 void AmPosControl::updateConvertedState()
@@ -535,10 +447,58 @@ void AmPosControl::updateActionHistory(const RlToolsAdapter::Action &action)
 	}
 }
 
+void AmPosControl::maybeLogPolicyDiagnostics(const RlToolsAdapter::Observation &observation, const RlToolsAdapter::Action &action)
+{
+	if (_startup_diag_samples_remaining <= 0) {
+		return;
+	}
+
+	const bool offboard_mode_active = activeMode() == ActiveMode::Offboard;
+	const char *mode_label = offboard_mode_active ? "AM Offboard" : "AM Position";
+
+	float mapped_action[kActionDim]{};
+	float mapped_sum = 0.0f;
+	float mapped_min = INFINITY;
+	float mapped_max = -INFINITY;
+
+	for (int i = 0; i < kActionDim; ++i) {
+		mapped_action[i] = math::constrain(1.0f / (1.0f + expf(-2.0f * action[i])), 0.0f, 1.0f);
+		mapped_sum += mapped_action[i];
+		mapped_min = math::min(mapped_min, mapped_action[i]);
+		mapped_max = math::max(mapped_max, mapped_action[i]);
+	}
+
+	const float mapped_mean = mapped_sum / static_cast<float>(kActionDim);
+	const float mapped_spread = mapped_max - mapped_min;
+
+	PX4_INFO(
+		"%s obs pos_err=(%.3f, %.3f, %.3f) grav_z=%.3f prev_action=(%.3f, %.3f, %.3f, %.3f)",
+		mode_label,
+		(double)observation[0], (double)observation[1], (double)observation[2], (double)observation[14],
+		(double)observation[31], (double)observation[32], (double)observation[33], (double)observation[34]);
+	PX4_INFO(
+		"%s act raw=(%.3f, %.3f, %.3f, %.3f) mapped=(%.3f, %.3f, %.3f, %.3f) mean=%.3f spread=%.3f",
+		mode_label,
+		(double)action[0], (double)action[1], (double)action[2], (double)action[3],
+		(double)mapped_action[0], (double)mapped_action[1], (double)mapped_action[2], (double)mapped_action[3],
+		(double)mapped_mean, (double)mapped_spread);
+
+	if (mapped_mean < kDiagLowMeanCommand
+	    || (mapped_min < kDiagLowMinCommand && mapped_spread > kDiagWideSpread)) {
+		PX4_WARN(
+			"%s action distribution looks weak/imbalanced: mean=%.3f min=%.3f max=%.3f",
+			mode_label,
+			(double)mapped_mean, (double)mapped_min, (double)mapped_max);
+	}
+
+	--_startup_diag_samples_remaining;
+}
+
 void AmPosControl::applyAction(const RlToolsAdapter::Action &action)
 {
 	actuator_motors_s actuator_motors{};
 	actuator_motors.timestamp = hrt_absolute_time();
+	actuator_motors.timestamp_sample = actuator_motors.timestamp;
 
 	for (int i = 0; i < kActionDim; ++i) {
 		const float mapped = 1.0f / (1.0f + expf(-2.0f * action[i]));
@@ -553,73 +513,59 @@ void AmPosControl::applyAction(const RlToolsAdapter::Action &action)
 	_actuator_motors_pub.publish(actuator_motors);
 }
 
+void AmPosControl::publishStopSetpoint()
+{
+	actuator_motors_s actuator_motors{};
+	actuator_motors.timestamp = hrt_absolute_time();
+	actuator_motors.timestamp_sample = actuator_motors.timestamp;
+
+	for (int i = 0; i < kMotorControlDim; ++i) {
+		actuator_motors.control[i] = NAN;
+	}
+
+	actuator_motors.reversible_flags = 0;
+	_actuator_motors_pub.publish(actuator_motors);
+}
+
 void AmPosControl::Run()
 {
 	if (should_exit()) {
+		publishStopSetpoint();
 		_angular_velocity_sub.unregisterCallback();
-		unregisterMode(_manual_mode);
-		unregisterMode(_offboard_mode);
 		exit_and_cleanup();
 		return;
 	}
 
-	if (!_manual_mode.registration_requested) {
-		registerMode(_manual_mode);
-		_manual_mode.registration_requested = true;
-		return;
-	}
-
-	if (_param_ampc_offb_en.get() && !_offboard_mode.registration_requested) {
-		registerMode(_offboard_mode);
-		_offboard_mode.registration_requested = true;
-		return;
-	}
-
 	perf_begin(_loop_perf);
-
-	checkModeRegistration();
-
-	if (_arming_check_request_sub.updated()) {
-		arming_check_request_s arming_check_request{};
-		_arming_check_request_sub.copy(&arming_check_request);
-
-		if (_manual_mode.registered()) {
-			replyToArmingCheck(_manual_mode, arming_check_request.request_id);
-		}
-
-		if (_offboard_mode.registered()) {
-			replyToArmingCheck(_offboard_mode, arming_check_request.request_id);
-		}
-	}
+	publishStatus();
 
 	vehicle_status_s vehicle_status{};
 	const bool was_using_am_mode = _use_am_mode;
 	if (_vehicle_status_sub.updated()) {
 		_vehicle_status_sub.copy(&vehicle_status);
-		_use_am_mode = (_manual_mode.registered() && vehicle_status.nav_state == _manual_mode.mode_id)
-			       || (_offboard_mode.registered() && vehicle_status.nav_state == _offboard_mode.mode_id);
+		_use_am_mode = vehicle_status.nav_state == vehicle_status_s::NAVIGATION_STATE_AM_POSITION
+			       || vehicle_status.nav_state == vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD;
 	}
 
 	if (_parameter_update_sub.updated()) {
 		parameter_update_s param_update{};
 		_parameter_update_sub.copy(&param_update);
 		updateParams();
-
-		if (_manual_mode.registered()) {
-			configureMode(_manual_mode);
-		}
-
-		if (_offboard_mode.registered()) {
-			configureMode(_offboard_mode);
-		}
 	}
 
 	if (_use_am_mode && !was_using_am_mode) {
 		resetCommandReference();
 		_adapter.reset();
+		_startup_diag_samples_remaining = kStartupDiagSamples;
 	}
 
 	if (!_use_am_mode) {
+		if (was_using_am_mode) {
+			publishStopSetpoint();
+			resetCommandReference();
+			_adapter.reset();
+		}
+
 		perf_end(_loop_perf);
 		return;
 	}
@@ -633,9 +579,10 @@ void AmPosControl::Run()
 
 			if (hrt_elapsed_time(&_last_offboard_diag) > 1_s) {
 				_last_offboard_diag = hrt_absolute_time();
-				PX4_WARN("AM Position Offboard waiting for supported offboard_control_mode");
+				PX4_WARN("AM Offboard waiting for supported offboard_control_mode");
 			}
 
+			publishStopSetpoint();
 			perf_end(_loop_perf);
 			return;
 		}
@@ -645,6 +592,7 @@ void AmPosControl::Run()
 	if (!updateVehicleState(dt_s)) {
 		_adapter.reset();
 		resetCommandReference();
+		publishStopSetpoint();
 		perf_end(_loop_perf);
 		return;
 	}
@@ -652,13 +600,17 @@ void AmPosControl::Run()
 	if (!armStateValid()) {
 		_adapter.reset();
 		resetCommandReference();
+		publishStopSetpoint();
 		perf_end(_loop_perf);
 		return;
 	}
 
 	_trajectory_setpoint_sub.update(&_trajectory_setpoint);
 
-	if (!trajectorySetpointValid()) {
+	const bool trajectory_setpoint_valid = activeMode() == ActiveMode::Offboard ? offboardTrajectorySetpointValid() :
+					       trajectorySetpointValid();
+
+	if (!trajectory_setpoint_valid) {
 		_adapter.reset();
 		resetCommandReference();
 
@@ -667,6 +619,7 @@ void AmPosControl::Run()
 			PX4_WARN("AM Position waiting for fresh trajectory_setpoint");
 		}
 
+		publishStopSetpoint();
 		perf_end(_loop_perf);
 		return;
 	}
@@ -678,8 +631,13 @@ void AmPosControl::Run()
 
 	RlToolsAdapter::Action action{};
 	if (_adapter.infer(hrt_absolute_time(), observation, action)) {
+		maybeLogPolicyDiagnostics(observation, action);
 		applyAction(action);
 		updateActionHistory(action);
+
+	} else {
+		publishStopSetpoint();
+		resetCommandReference();
 	}
 
 	perf_end(_loop_perf);
@@ -713,29 +671,10 @@ int AmPosControl::custom_command(int argc, char *argv[])
 
 int AmPosControl::print_status()
 {
-	_sticks.checkAndUpdateStickInputs();
-	const bool manual_control_available = _sticks.isAvailable();
+	const bool manual_control_available = manualControlAvailable();
 	const bool arm_state_valid = armStateValid();
 	const bool trajectory_setpoint_valid = trajectorySetpointValid();
 	_offboard_control_mode_sub.update(&_offboard_control_mode);
-
-	if (!_manual_mode.registered()) {
-		PX4_INFO("%s registration pending", _manual_mode.name);
-
-	} else {
-		PX4_INFO("%s registered, mode id: %d, arming check id: %d",
-			 _manual_mode.name, _manual_mode.mode_id, _manual_mode.arming_check_id);
-	}
-
-	if (_param_ampc_offb_en.get()) {
-		if (!_offboard_mode.registered()) {
-			PX4_INFO("%s replacement registration pending", _offboard_mode.name);
-
-		} else {
-			PX4_INFO("%s replacement registered, mode id: %d, arming check id: %d",
-				 _offboard_mode.name, _offboard_mode.mode_id, _offboard_mode.arming_check_id);
-		}
-	}
 
 	const bool manual_control_required = activeMode() != ActiveMode::Offboard;
 	PX4_INFO("manual_control_required: %s, manual_control_available: %s",
@@ -760,9 +699,10 @@ int AmPosControl::print_usage(const char *reason)
 ### Description
 AM Position direct-actuator controller.
 
-This module registers a selectable AM Position mode and can optionally
-replace the internal Offboard mode. It consumes trajectory setpoints and
-publishes direct motor commands for a multicopter-with-arm setup.
+This module executes the internal AM Position and AM Offboard modes. The
+manual mode consumes FlightModeManager position-style setpoints while the
+offboard mode consumes external trajectory setpoints, and both route direct
+motor commands for a multicopter-with-arm setup.
 )DESCR_STR");
 
 	PRINT_MODULE_USAGE_NAME("am_pos_control", "controller");

@@ -36,6 +36,7 @@ px4_add_library(health_and_arming_checks
 	HealthAndArmingChecks.cpp
 
 	checks/accelerometerCheck.cpp
+	checks/amPosControlCheck.cpp
 	checks/airspeedCheck.cpp
 	checks/armPermissionCheck.cpp
 	checks/baroCheck.cpp
@@ -73,5 +74,9 @@ px4_add_library(health_and_arming_checks
 add_dependencies(health_and_arming_checks mode_util)
 
 px4_add_functional_gtest(SRC HealthAndArmingChecksTest.cpp
+	LINKLIBS health_and_arming_checks mode_util
+	)
+
+px4_add_functional_gtest(SRC AmPosControlCheckTest.cpp
 	LINKLIBS health_and_arming_checks mode_util
 	)

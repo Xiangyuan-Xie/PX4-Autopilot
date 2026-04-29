@@ -1,0 +1,10 @@
+uint64 timestamp
+
+bool module_running
+bool manual_control_available
+bool arm_state_valid
+bool trajectory_setpoint_valid
+bool offboard_control_mode_fresh
+bool offboard_control_mode_supported
+bool am_position_available
+bool am_offboard_available

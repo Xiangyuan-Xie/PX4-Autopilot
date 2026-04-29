@@ -424,6 +424,14 @@ OSDatxxxx::get_flight_mode(uint8_t nav_state)
 		flight_mode = "OFFBOARD";
 		break;
 
+	case vehicle_status_s::NAVIGATION_STATE_AM_POSITION:
+		flight_mode = "AM POSITION";
+		break;
+
+	case vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD:
+		flight_mode = "AM OFFBOARD";
+		break;
+
 	case vehicle_status_s::NAVIGATION_STATE_STAB:
 		flight_mode = "STABILIZED";
 		break;

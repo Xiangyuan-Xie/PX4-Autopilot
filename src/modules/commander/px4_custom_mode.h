@@ -79,7 +79,13 @@ enum PX4_CUSTOM_SUB_MODE_AUTO {
 enum PX4_CUSTOM_SUB_MODE_POSCTL {
 	PX4_CUSTOM_SUB_MODE_POSCTL_POSCTL = 0,
 	PX4_CUSTOM_SUB_MODE_POSCTL_ORBIT,
-	PX4_CUSTOM_SUB_MODE_POSCTL_SLOW
+	PX4_CUSTOM_SUB_MODE_POSCTL_SLOW,
+	PX4_CUSTOM_SUB_MODE_POSCTL_AM_POSITION
+};
+
+enum PX4_CUSTOM_SUB_MODE_OFFBOARD {
+	PX4_CUSTOM_SUB_MODE_OFFBOARD_DEFAULT = 0,
+	PX4_CUSTOM_SUB_MODE_OFFBOARD_AM_OFFBOARD
 };
 
 union px4_custom_mode {
@@ -126,6 +132,11 @@ static inline union px4_custom_mode get_px4_custom_mode(uint8_t nav_state)
 		custom_mode.sub_mode = PX4_CUSTOM_SUB_MODE_POSCTL_SLOW;
 		break;
 
+	case vehicle_status_s::NAVIGATION_STATE_AM_POSITION:
+		custom_mode.main_mode = PX4_CUSTOM_MAIN_MODE_POSCTL;
+		custom_mode.sub_mode = PX4_CUSTOM_SUB_MODE_POSCTL_AM_POSITION;
+		break;
+
 	case vehicle_status_s::NAVIGATION_STATE_AUTO_MISSION:
 		custom_mode.main_mode = PX4_CUSTOM_MAIN_MODE_AUTO;
 		custom_mode.sub_mode = PX4_CUSTOM_SUB_MODE_AUTO_MISSION;
@@ -156,6 +167,11 @@ static inline union px4_custom_mode get_px4_custom_mode(uint8_t nav_state)
 
 	case vehicle_status_s::NAVIGATION_STATE_OFFBOARD:
 		custom_mode.main_mode = PX4_CUSTOM_MAIN_MODE_OFFBOARD;
+		break;
+
+	case vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD:
+		custom_mode.main_mode = PX4_CUSTOM_MAIN_MODE_OFFBOARD;
+		custom_mode.sub_mode = PX4_CUSTOM_SUB_MODE_OFFBOARD_AM_OFFBOARD;
 		break;
 
 	case vehicle_status_s::NAVIGATION_STATE_STAB:

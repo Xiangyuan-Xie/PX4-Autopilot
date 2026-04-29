@@ -466,7 +466,8 @@ void Failsafe::checkStateAndMode(const hrt_abstime &time_us, const State &state,
 					     && (_param_com_rcl_except.get() & (int)ManualControlLossExceptionBits::Mission);
 	const bool rc_loss_ignored_loiter = state.user_intended_mode == vehicle_status_s::NAVIGATION_STATE_AUTO_LOITER
 					    && (_param_com_rcl_except.get() & (int)ManualControlLossExceptionBits::Hold);
-	const bool rc_loss_ignored_offboard = state.user_intended_mode == vehicle_status_s::NAVIGATION_STATE_OFFBOARD
+	const bool rc_loss_ignored_offboard = (state.user_intended_mode == vehicle_status_s::NAVIGATION_STATE_OFFBOARD
+					      || state.user_intended_mode == vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD)
 					      && (_param_com_rcl_except.get() & (int)ManualControlLossExceptionBits::Offboard);
 	const bool rc_loss_ignored_takeoff = (state.user_intended_mode == vehicle_status_s::NAVIGATION_STATE_AUTO_TAKEOFF ||
 					      state.user_intended_mode == vehicle_status_s::NAVIGATION_STATE_AUTO_VTOL_TAKEOFF)
@@ -503,7 +504,8 @@ void Failsafe::checkStateAndMode(const hrt_abstime &time_us, const State &state,
 					      && (_param_com_dll_except.get() & (int)DatalinkLossExceptionBits::Mission);
 	const bool dll_loss_ignored_loiter = state.user_intended_mode == vehicle_status_s::NAVIGATION_STATE_AUTO_LOITER
 					     && (_param_com_dll_except.get() & (int)DatalinkLossExceptionBits::Hold);
-	const bool dll_loss_ignored_offboard = state.user_intended_mode == vehicle_status_s::NAVIGATION_STATE_OFFBOARD
+	const bool dll_loss_ignored_offboard = (state.user_intended_mode == vehicle_status_s::NAVIGATION_STATE_OFFBOARD
+					       || state.user_intended_mode == vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD)
 					       && (_param_com_dll_except.get() & (int)DatalinkLossExceptionBits::Offboard);
 	const bool dll_loss_ignored_takeoff = (state.user_intended_mode == vehicle_status_s::NAVIGATION_STATE_AUTO_TAKEOFF ||
 					       state.user_intended_mode == vehicle_status_s::NAVIGATION_STATE_AUTO_VTOL_TAKEOFF)

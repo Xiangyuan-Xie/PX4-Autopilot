@@ -26,3 +26,13 @@ px4_add_module(
 target_include_directories(am_pos_control PRIVATE ${PX4_SOURCE_DIR}/third_party/rl_tools/include)
 target_compile_features(am_pos_control PRIVATE cxx_std_17)
 target_compile_options(am_pos_control PRIVATE -Wno-unused-local-typedefs)
+
+add_library(am_pos_control_policy_blob INTERFACE)
+target_include_directories(am_pos_control_policy_blob INTERFACE
+	${CMAKE_CURRENT_SOURCE_DIR}
+	${PX4_SOURCE_DIR}/third_party/rl_tools/include
+)
+target_compile_features(am_pos_control_policy_blob INTERFACE cxx_std_17)
+target_compile_options(am_pos_control_policy_blob INTERFACE -Wno-unused-local-typedefs)
+
+px4_add_unit_gtest(SRC am_pos_control_policy_blob_test.cpp LINKLIBS am_pos_control_policy_blob)

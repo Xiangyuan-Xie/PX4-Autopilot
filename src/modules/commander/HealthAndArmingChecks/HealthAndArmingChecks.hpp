@@ -41,6 +41,7 @@
 #include <uORB/topics/failsafe_flags.h>
 
 #include "checks/accelerometerCheck.hpp"
+#include "checks/amPosControlCheck.hpp"
 #include "checks/airspeedCheck.hpp"
 #include "checks/armPermissionCheck.hpp"
 #include "checks/baroCheck.hpp"
@@ -126,6 +127,7 @@ private:
 
 	// all checks
 	AccelerometerChecks _accelerometer_checks;
+	AmPosControlChecks _am_pos_control_checks;
 	AirspeedChecks _airspeed_checks;
 	ArmPermissionChecks _arm_permission_checks;
 	BaroChecks _baro_checks;
@@ -165,6 +167,7 @@ private:
 #ifndef CONSTRAINED_FLASH
 		&_external_checks,
 #endif
+		&_am_pos_control_checks,
 		&_accelerometer_checks,
 		&_airspeed_checks,
 		&_arm_permission_checks,

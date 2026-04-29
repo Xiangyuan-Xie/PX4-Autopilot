@@ -376,6 +376,10 @@ int Commander::custom_command(int argc, char *argv[])
 			} else if (!strcmp(argv[1], "posctl")) {
 				send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_POSCTL);
 
+			} else if (!strcmp(argv[1], "am_position")) {
+				send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_POSCTL,
+						     PX4_CUSTOM_SUB_MODE_POSCTL_AM_POSITION);
+
 			} else if (!strcmp(argv[1], "position:slow")) {
 				send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_POSCTL,
 						     PX4_CUSTOM_SUB_MODE_POSCTL_SLOW);
@@ -400,6 +404,10 @@ int Commander::custom_command(int argc, char *argv[])
 
 			} else if (!strcmp(argv[1], "offboard")) {
 				send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_OFFBOARD);
+
+			} else if (!strcmp(argv[1], "am_offboard")) {
+				send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_OFFBOARD,
+						     PX4_CUSTOM_SUB_MODE_OFFBOARD_AM_OFFBOARD);
 
 			} else if (!strcmp(argv[1], "stabilized")) {
 				send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_STABILIZED);
@@ -826,6 +834,10 @@ Commander::handle_command(const vehicle_command_s &cmd)
 					case PX4_CUSTOM_SUB_MODE_POSCTL_SLOW:
 						desired_nav_state = vehicle_status_s::NAVIGATION_STATE_POSITION_SLOW;
 						break;
+
+					case PX4_CUSTOM_SUB_MODE_POSCTL_AM_POSITION:
+						desired_nav_state = vehicle_status_s::NAVIGATION_STATE_AM_POSITION;
+						break;
 					}
 
 				} else if (custom_main_mode == PX4_CUSTOM_MAIN_MODE_AUTO) {
@@ -883,7 +895,9 @@ Commander::handle_command(const vehicle_command_s &cmd)
 					desired_nav_state = vehicle_status_s::NAVIGATION_STATE_STAB;
 
 				} else if (custom_main_mode == PX4_CUSTOM_MAIN_MODE_OFFBOARD) {
-					desired_nav_state = vehicle_status_s::NAVIGATION_STATE_OFFBOARD;
+					desired_nav_state = custom_sub_mode == PX4_CUSTOM_SUB_MODE_OFFBOARD_AM_OFFBOARD
+							   ? vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD
+							   : vehicle_status_s::NAVIGATION_STATE_OFFBOARD;
 				}
 
 			} else {
@@ -1941,6 +1955,13 @@ void Commander::run()
 
 			// vehicle_status publish (after prearm/preflight updates above)
 			_mode_management.getModeStatus(_vehicle_status.valid_nav_states_mask, _vehicle_status.can_set_nav_states_mask);
+			if (!_health_and_arming_checks.canRun(vehicle_status_s::NAVIGATION_STATE_AM_POSITION)) {
+				_vehicle_status.can_set_nav_states_mask &= ~(1u << vehicle_status_s::NAVIGATION_STATE_AM_POSITION);
+			}
+
+			if (!_health_and_arming_checks.canRun(vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD)) {
+				_vehicle_status.can_set_nav_states_mask &= ~(1u << vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD);
+			}
 			_vehicle_status.timestamp = hrt_absolute_time();
 			_vehicle_status_pub.publish(_vehicle_status);
 
@@ -3057,7 +3078,7 @@ The commander module contains the state machine for mode switching and failsafe 
 	PRINT_MODULE_USAGE_COMMAND("land");
 	PRINT_MODULE_USAGE_COMMAND_DESCR("transition", "VTOL transition");
 	PRINT_MODULE_USAGE_COMMAND_DESCR("mode", "Change flight mode");
-	PRINT_MODULE_USAGE_ARG("manual|acro|offboard|stabilized|altctl|posctl|altitude_cruise|position:slow|auto:mission|auto:loiter|auto:rtl|auto:takeoff|auto:land|auto:precland|ext1",
+	PRINT_MODULE_USAGE_ARG("manual|acro|offboard|am_offboard|stabilized|altctl|posctl|am_position|altitude_cruise|position:slow|auto:mission|auto:loiter|auto:rtl|auto:takeoff|auto:land|auto:precland|ext1",
 			"Flight mode", false);
 	PRINT_MODULE_USAGE_COMMAND("pair");
 	PRINT_MODULE_USAGE_COMMAND("termination");

@@ -49,6 +49,8 @@ static constexpr uint8_t NAVIGATION_STATE_POSCTL = vehicle_status_s::NAVIGATION_
 static constexpr uint8_t NAVIGATION_STATE_AUTO_MISSION = vehicle_status_s::NAVIGATION_STATE_AUTO_MISSION;
 static constexpr uint8_t NAVIGATION_STATE_AUTO_LOITER = vehicle_status_s::NAVIGATION_STATE_AUTO_LOITER;
 static constexpr uint8_t NAVIGATION_STATE_ACRO = vehicle_status_s::NAVIGATION_STATE_ACRO;
+static constexpr uint8_t NAVIGATION_STATE_AM_POSITION = vehicle_status_s::NAVIGATION_STATE_AM_POSITION;
+static constexpr uint8_t NAVIGATION_STATE_AM_OFFBOARD = vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD;
 
 class TestManualControl : public ManualControl
 {
@@ -91,6 +93,12 @@ public:
 	TestManualControl _manual_control;
 	hrt_abstime _timestamp{SOME_TIME};
 };
+
+TEST(ManualControlTest, MapsDedicatedAmFlightModeParams)
+{
+	EXPECT_EQ(TestManualControl::navStateFromParam(17), NAVIGATION_STATE_AM_POSITION);
+	EXPECT_EQ(TestManualControl::navStateFromParam(18), NAVIGATION_STATE_AM_OFFBOARD);
+}
 
 
 TEST_F(SwitchTest, KillSwitch)
