@@ -616,8 +616,9 @@ transition_result_t Commander::arm(arm_disarm_reason_t calling_reason, bool run_
 		}
 
 		_health_and_arming_checks.update(false, true);
+		const uint8_t arming_check_nav_state = getNavStateForArmingCheck(_vehicle_status.nav_state, _user_mode_intention.get());
 
-		if (!_health_and_arming_checks.canArm(_vehicle_status.nav_state)) {
+		if (!_health_and_arming_checks.canArm(arming_check_nav_state)) {
 			tune_negative(true);
 			mavlink_log_critical(&_mavlink_log_pub, "Arming denied: Resolve system health failures first\t");
 			events::send(events::ID("commander_arm_denied_resolve_failures"), {events::Log::Critical, events::LogInternal::Info},
@@ -1955,13 +1956,8 @@ void Commander::run()
 
 			// vehicle_status publish (after prearm/preflight updates above)
 			_mode_management.getModeStatus(_vehicle_status.valid_nav_states_mask, _vehicle_status.can_set_nav_states_mask);
-			if (!_health_and_arming_checks.canRun(vehicle_status_s::NAVIGATION_STATE_AM_POSITION)) {
-				_vehicle_status.can_set_nav_states_mask &= ~(1u << vehicle_status_s::NAVIGATION_STATE_AM_POSITION);
-			}
-
-			if (!_health_and_arming_checks.canRun(vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD)) {
-				_vehicle_status.can_set_nav_states_mask &= ~(1u << vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD);
-			}
+			_vehicle_status.can_set_nav_states_mask = filterCanSetNavStatesForAmVisibility(_vehicle_status.can_set_nav_states_mask,
+					_health_and_arming_checks.canRun(vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD));
 			_vehicle_status.timestamp = hrt_absolute_time();
 			_vehicle_status_pub.publish(_vehicle_status);
 

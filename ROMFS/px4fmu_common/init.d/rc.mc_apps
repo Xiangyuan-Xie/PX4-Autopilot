@@ -42,7 +42,4 @@ then
 	mc_nn_control start
 fi
 
-if param compare -s AM_POS_EN 1
-then
-	am_pos_control start
-fi
+am_pos_control start

@@ -7,14 +7,6 @@
 #include <parameters/param.h>
 
 /**
- * If true the AM Position module is automatically started on boot.
- *
- * @boolean
- * @group AM Position
- */
-PARAM_DEFINE_INT32(AM_POS_EN, 1);
-
-/**
  * Maximum horizontal forward manual velocity for AM Position.
  *
  * @unit m/s

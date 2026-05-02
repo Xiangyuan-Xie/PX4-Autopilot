@@ -122,6 +122,27 @@ public:
 
 	void enable_hil();
 
+	static uint32_t filterCanSetNavStatesForAmVisibility(uint32_t can_set_nav_states_mask, bool am_offboard_can_run)
+	{
+		if (!am_offboard_can_run) {
+			can_set_nav_states_mask &= ~(1u << vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD);
+		}
+
+		return can_set_nav_states_mask;
+	}
+
+	static uint8_t getNavStateForArmingCheck(uint8_t current_nav_state, uint8_t user_intended_nav_state)
+	{
+		switch (user_intended_nav_state) {
+		case vehicle_status_s::NAVIGATION_STATE_POSCTL:
+		case vehicle_status_s::NAVIGATION_STATE_AM_POSITION:
+			return user_intended_nav_state;
+
+		default:
+			return current_nav_state;
+		}
+	}
+
 private:
 	bool isArmed() const { return (_vehicle_status.arming_state == vehicle_status_s::ARMING_STATE_ARMED); }
 	static ModeChangeSource getSourceFromCommand(const vehicle_command_s &cmd);
