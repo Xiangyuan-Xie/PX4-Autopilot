@@ -41,6 +41,7 @@ parameters:
                 16: Altitude Cruise
                 17: AM Position
                 18: AM Offboard
+                19: AM Test
                 100: External Mode 1
                 101: External Mode 2
                 102: External Mode 3

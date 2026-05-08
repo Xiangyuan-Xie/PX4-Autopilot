@@ -142,6 +142,17 @@ namespace logger
 
 constexpr const char *Logger::LOG_ROOT[(int)LogType::Count];
 
+bool Logger::should_start_file_log(LogMode log_mode, bool arm_until_shutdown_latched, bool armed, uint8_t nav_state)
+{
+	const bool am_test_mode = nav_state == vehicle_status_s::NAVIGATION_STATE_AM_TEST;
+	return armed || am_test_mode || (arm_until_shutdown_latched && log_mode == LogMode::arm_until_shutdown);
+}
+
+bool Logger::arm_until_shutdown_latched_after_update(LogMode log_mode, bool arm_until_shutdown_latched, bool armed)
+{
+	return arm_until_shutdown_latched || (armed && log_mode == LogMode::arm_until_shutdown);
+}
+
 int Logger::custom_command(int argc, char *argv[])
 {
 	if (!is_running()) {
@@ -1127,9 +1138,15 @@ bool Logger::start_stop_logging()
 		vehicle_status_s vehicle_status;
 
 		if (_vehicle_status_sub.update(&vehicle_status)) {
+			const bool armed = vehicle_status.arming_state == vehicle_status_s::ARMING_STATE_ARMED;
+			_arm_until_shutdown_latched = arm_until_shutdown_latched_after_update(_log_mode,
+						     _arm_until_shutdown_latched,
+						     armed);
 
-			desired_state = (vehicle_status.arming_state == vehicle_status_s::ARMING_STATE_ARMED) ||
-					(_prev_file_log_start_state && _log_mode == LogMode::arm_until_shutdown);
+			desired_state = should_start_file_log(_log_mode,
+							      _arm_until_shutdown_latched,
+							      armed,
+							      vehicle_status.nav_state);
 			updated = true;
 		}
 	}

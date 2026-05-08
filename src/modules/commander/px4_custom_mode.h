@@ -80,7 +80,8 @@ enum PX4_CUSTOM_SUB_MODE_POSCTL {
 	PX4_CUSTOM_SUB_MODE_POSCTL_POSCTL = 0,
 	PX4_CUSTOM_SUB_MODE_POSCTL_ORBIT,
 	PX4_CUSTOM_SUB_MODE_POSCTL_SLOW,
-	PX4_CUSTOM_SUB_MODE_POSCTL_AM_POSITION
+	PX4_CUSTOM_SUB_MODE_POSCTL_AM_POSITION,
+	PX4_CUSTOM_SUB_MODE_POSCTL_AM_TEST
 };
 
 enum PX4_CUSTOM_SUB_MODE_OFFBOARD {
@@ -135,6 +136,11 @@ static inline union px4_custom_mode get_px4_custom_mode(uint8_t nav_state)
 	case vehicle_status_s::NAVIGATION_STATE_AM_POSITION:
 		custom_mode.main_mode = PX4_CUSTOM_MAIN_MODE_POSCTL;
 		custom_mode.sub_mode = PX4_CUSTOM_SUB_MODE_POSCTL_AM_POSITION;
+		break;
+
+	case vehicle_status_s::NAVIGATION_STATE_AM_TEST:
+		custom_mode.main_mode = PX4_CUSTOM_MAIN_MODE_POSCTL;
+		custom_mode.sub_mode = PX4_CUSTOM_SUB_MODE_POSCTL_AM_TEST;
 		break;
 
 	case vehicle_status_s::NAVIGATION_STATE_AUTO_MISSION:

@@ -80,4 +80,6 @@ px4_add_module(
 
 px4_add_unit_gtest(SRC mag_calibration_test.cpp LINKLIBS modules__commander)
 px4_add_unit_gtest(SRC px4_custom_mode_test.cpp LINKLIBS modules__commander)
+px4_add_unit_gtest(SRC UserModeIntentionTest.cpp)
+add_dependencies(unit-UserModeIntention uorb_headers)
 px4_add_functional_gtest(SRC ModeManagementTest.cpp LINKLIBS modules__commander)

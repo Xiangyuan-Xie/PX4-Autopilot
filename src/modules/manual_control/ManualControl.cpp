@@ -593,6 +593,7 @@ int8_t ManualControl::navStateFromParam(int32_t param_value)
 		case 16: return vehicle_status_s::NAVIGATION_STATE_ALTITUDE_CRUISE;
 		case 17: return vehicle_status_s::NAVIGATION_STATE_AM_POSITION;
 		case 18: return vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD;
+		case 19: return vehicle_status_s::NAVIGATION_STATE_AM_TEST;
 
 		case 100: return vehicle_status_s::NAVIGATION_STATE_EXTERNAL1;
 		case 101: return vehicle_status_s::NAVIGATION_STATE_EXTERNAL2;

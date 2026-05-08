@@ -23,6 +23,17 @@ TEST(Px4CustomModeTest, EncodesAmOffboardAsDedicatedOffboardSubmode)
 	EXPECT_EQ(custom_mode.sub_mode, 1);
 }
 
+TEST(Px4CustomModeTest, EncodesAmTestAsDedicatedPosctlSubmode)
+{
+	const px4_custom_mode custom_mode = get_px4_custom_mode(vehicle_status_s::NAVIGATION_STATE_AM_TEST);
+
+	EXPECT_EQ(custom_mode.main_mode, PX4_CUSTOM_MAIN_MODE_POSCTL);
+	EXPECT_EQ(custom_mode.sub_mode, PX4_CUSTOM_SUB_MODE_POSCTL_AM_TEST);
+	EXPECT_NE(custom_mode.sub_mode, PX4_CUSTOM_SUB_MODE_POSCTL_ORBIT);
+	EXPECT_NE(custom_mode.sub_mode, PX4_CUSTOM_SUB_MODE_POSCTL_SLOW);
+	EXPECT_NE(custom_mode.sub_mode, PX4_CUSTOM_SUB_MODE_POSCTL_AM_POSITION);
+}
+
 TEST(Px4CustomModeTest, KeepsAmPositionAdvertisedWhenAmOffboardIsFiltered)
 {
 	const uint32_t am_position_bit = 1u << vehicle_status_s::NAVIGATION_STATE_AM_POSITION;

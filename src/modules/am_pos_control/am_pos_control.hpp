@@ -21,6 +21,9 @@
 #include <uORB/SubscriptionCallback.hpp>
 #include <uORB/topics/actuator_motors.h>
 #include <uORB/topics/am_pos_control_status.h>
+#include <uORB/topics/am_policy_observation.h>
+#include <uORB/topics/am_test_result.h>
+#include <uORB/topics/am_test_status.h>
 #include <uORB/topics/arm_joint_state.h>
 #include <uORB/topics/offboard_control_mode.h>
 #include <uORB/topics/parameter_update.h>
@@ -46,6 +49,113 @@ public:
 	int print_status() override;
 
 	bool init();
+	static void fillAmTestResultFromAction(am_test_result_s &result, hrt_abstime now, hrt_abstime timestamp_sample,
+					       hrt_abstime am_setpoint_timestamp, const RlToolsAdapter::Action &action,
+					       uint32_t degraded_flags = am_test_result_s::DEGRADED_NONE)
+	{
+		result = {};
+		result.timestamp = now;
+		result.timestamp_sample = timestamp_sample;
+		result.am_valid = true;
+		result.failure_flags = am_test_result_s::FAILURE_NONE;
+		result.degraded_flags = degraded_flags;
+		result.am_setpoint_timestamp = am_setpoint_timestamp;
+
+		for (int i = 0; i < kActionDim; ++i) {
+			const float mapped = math::constrain(1.0f / (1.0f + expf(-2.0f * action[i])), 0.0f, 1.0f);
+			result.am_raw_action[i] = action[i];
+			result.am_mapped_action[i] = mapped;
+			result.am_motor_control[i] = mapped;
+		}
+
+		for (int i = kActionDim; i < kMotorControlDim; ++i) {
+			result.am_motor_control[i] = NAN;
+		}
+	}
+
+	static void fillInvalidAmTestResult(am_test_result_s &result, hrt_abstime now, hrt_abstime timestamp_sample,
+					    hrt_abstime am_setpoint_timestamp, uint32_t failure_flags,
+					    uint32_t degraded_flags = am_test_result_s::DEGRADED_NONE)
+	{
+		result = {};
+		result.timestamp = now;
+		result.timestamp_sample = timestamp_sample;
+		result.am_valid = false;
+		result.failure_flags = failure_flags;
+		result.degraded_flags = degraded_flags;
+		result.am_setpoint_timestamp = am_setpoint_timestamp;
+
+		for (float &value : result.am_raw_action) {
+			value = NAN;
+		}
+
+		for (float &value : result.am_mapped_action) {
+			value = NAN;
+		}
+
+		for (float &value : result.am_motor_control) {
+			value = NAN;
+		}
+	}
+
+	static bool vehicleStateValidStrict(const vehicle_local_position_s &position, bool attitude_valid,
+					    bool angular_velocity_valid, hrt_abstime now)
+	{
+		if ((position.timestamp == 0) || (now > position.timestamp + kStateTimeout)) {
+			return false;
+		}
+
+		const bool xy_valid = position.xy_valid && PX4_ISFINITE(position.x) && PX4_ISFINITE(position.y);
+		const bool z_valid = position.z_valid && PX4_ISFINITE(position.z);
+		const bool v_xy_valid = position.v_xy_valid && PX4_ISFINITE(position.vx) && PX4_ISFINITE(position.vy);
+		const bool v_z_valid = position.v_z_valid && PX4_ISFINITE(position.vz);
+		const bool heading_valid = PX4_ISFINITE(position.heading);
+
+		return xy_valid && z_valid && v_xy_valid && v_z_valid && heading_valid && attitude_valid && angular_velocity_valid;
+	}
+
+	static bool vehicleStateValidForAmTest(const vehicle_local_position_s &position, bool attitude_valid,
+					       bool angular_velocity_valid, hrt_abstime now, uint32_t &degraded_flags)
+	{
+		degraded_flags = am_test_result_s::DEGRADED_NONE;
+
+		if ((position.timestamp == 0) || (now > position.timestamp + kStateTimeout)) {
+			return false;
+		}
+
+		if (!position.xy_valid) {
+			degraded_flags |= am_test_result_s::DEGRADED_LOCAL_XY_INVALID;
+		}
+
+		if (!position.v_xy_valid) {
+			degraded_flags |= am_test_result_s::DEGRADED_LOCAL_VXY_INVALID;
+		}
+
+		const bool xy_values_finite = PX4_ISFINITE(position.x) && PX4_ISFINITE(position.y);
+		const bool z_valid = position.z_valid && PX4_ISFINITE(position.z);
+		const bool v_xy_values_finite = PX4_ISFINITE(position.vx) && PX4_ISFINITE(position.vy);
+		const bool v_z_valid = position.v_z_valid && PX4_ISFINITE(position.vz);
+		const bool heading_valid = PX4_ISFINITE(position.heading);
+
+		return xy_values_finite && z_valid && v_xy_values_finite && v_z_valid && heading_valid
+		       && attitude_valid && angular_velocity_valid;
+	}
+
+	static void fillDefaultAmTestSetpoint(trajectory_setpoint_s &setpoint, hrt_abstime now,
+					      const vehicle_local_position_s &position, uint32_t &degraded_flags)
+	{
+		setpoint = {};
+		setpoint.timestamp = now;
+		setpoint.position[0] = position.x;
+		setpoint.position[1] = position.y;
+		setpoint.position[2] = position.z;
+		setpoint.velocity[0] = 0.0f;
+		setpoint.velocity[1] = 0.0f;
+		setpoint.velocity[2] = 0.0f;
+		setpoint.yaw = position.heading;
+		setpoint.yawspeed = 0.0f;
+		degraded_flags |= am_test_result_s::DEGRADED_SETPOINT_DEFAULTED;
+	}
 
 private:
 	static constexpr int kActionDim = 4;
@@ -63,7 +173,8 @@ private:
 	enum class ActiveMode : uint8_t {
 		None = 0,
 		Manual,
-		Offboard
+		Offboard,
+		Test
 	};
 
 	struct CommandReference {
@@ -79,26 +190,34 @@ private:
 
 	void Run() override;
 	void updateTargets();
-		void buildObservation(RlToolsAdapter::Observation &observation);
-		void applyAction(const RlToolsAdapter::Action &action);
-		void publishStopSetpoint();
-		void updateActionHistory(const RlToolsAdapter::Action &action);
-		void maybeLogPolicyDiagnostics(const RlToolsAdapter::Observation &observation, const RlToolsAdapter::Action &action);
-		void publishStatus();
+	void updateTargets(bool use_default_am_test_setpoint);
+	void buildObservation(RlToolsAdapter::Observation &observation);
+	void applyAction(const RlToolsAdapter::Observation &observation, const RlToolsAdapter::Action &action, bool publish_outputs,
+			 uint32_t degraded_flags = am_policy_observation_s::DEGRADED_NONE);
+	void publishPolicyObservation(const RlToolsAdapter::Observation &observation, const RlToolsAdapter::Action &action,
+				      const actuator_motors_s &actuator_motors, uint32_t degraded_flags);
+	void publishAmTestStatus(bool vehicle_state_valid, bool arm_state_valid, bool am_setpoint_valid, bool am_valid,
+				 uint32_t failure_flags, uint32_t degraded_flags);
+	void publishAmTestResult(uint32_t failure_flags, uint32_t degraded_flags);
+	void publishAmTestResult(const RlToolsAdapter::Action &action, uint32_t degraded_flags);
+	void publishStopSetpoint();
+	void updateActionHistory(const RlToolsAdapter::Action &action);
+	void maybeLogPolicyDiagnostics(const RlToolsAdapter::Observation &observation, const RlToolsAdapter::Action &action);
+	void publishStatus();
 	void resetCommandReference();
 	void resetState();
-	bool updateVehicleState(float &dt_s);
+	bool updateVehicleState(float &dt_s, bool allow_am_test_degraded, uint32_t &degraded_flags);
 	void updateConvertedState();
 	bool anyAxisActive(const bool axes[3]) const;
 	bool armStateValid() const;
 	bool vehicleStateValid() const;
-		bool attitudeValid() const;
-		bool angularVelocityValid() const;
-		bool trajectorySetpointFresh() const;
-		bool trajectorySetpointHasLinearInput() const;
-		bool offboardTrajectorySetpointValid() const;
-		bool trajectorySetpointValid() const;
-		bool offboardControlModeFresh() const;
+	bool attitudeValid() const;
+	bool angularVelocityValid() const;
+	bool trajectorySetpointFresh() const;
+	bool trajectorySetpointHasLinearInput() const;
+	bool offboardTrajectorySetpointValid() const;
+	bool trajectorySetpointValid() const;
+	bool offboardControlModeFresh() const;
 	bool offboardControlModeSupported() const;
 	bool offboardControlModeValid() const;
 	bool manualControlAvailable();
@@ -115,6 +234,9 @@ private:
 
 	uORB::Publication<actuator_motors_s> _actuator_motors_pub{ORB_ID(actuator_motors)};
 	uORB::Publication<am_pos_control_status_s> _status_pub{ORB_ID(am_pos_control_status)};
+	uORB::Publication<am_policy_observation_s> _policy_observation_pub{ORB_ID(am_policy_observation)};
+	uORB::Publication<am_test_result_s> _am_test_result_pub{ORB_ID(am_test_result)};
+	uORB::Publication<am_test_status_s> _am_test_status_pub{ORB_ID(am_test_status)};
 
 	perf_counter_t _loop_perf;
 	hrt_abstime _last_run{0};

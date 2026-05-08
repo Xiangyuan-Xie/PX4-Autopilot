@@ -26,6 +26,19 @@ TEST(ControlModeTest, UsesManualAmPositionControlModeForDedicatedInternalNavStat
 	EXPECT_FALSE(control_mode.flag_control_allocation_enabled);
 }
 
+TEST(ControlModeTest, UsesManualAmPositionControlModeForAmTestNavState)
+{
+	vehicle_control_mode_s control_mode{};
+	offboard_control_mode_s offboard_control_mode{};
+
+	mode_util::getVehicleControlMode(vehicle_status_s::NAVIGATION_STATE_AM_TEST,
+					 vehicle_status_s::VEHICLE_TYPE_ROTARY_WING,
+					 offboard_control_mode,
+					 control_mode);
+
+	EXPECT_TRUE(mode_util::isAmPositionControlMode(control_mode));
+}
+
 TEST(ControlModeTest, UsesOffboardAmPositionControlModeForDedicatedInternalNavState)
 {
 	vehicle_control_mode_s control_mode{};

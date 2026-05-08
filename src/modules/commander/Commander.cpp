@@ -380,6 +380,10 @@ int Commander::custom_command(int argc, char *argv[])
 				send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_POSCTL,
 						     PX4_CUSTOM_SUB_MODE_POSCTL_AM_POSITION);
 
+			} else if (!strcmp(argv[1], "am_test")) {
+				send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_POSCTL,
+						     PX4_CUSTOM_SUB_MODE_POSCTL_AM_TEST);
+
 			} else if (!strcmp(argv[1], "position:slow")) {
 				send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_POSCTL,
 						     PX4_CUSTOM_SUB_MODE_POSCTL_SLOW);
@@ -838,6 +842,10 @@ Commander::handle_command(const vehicle_command_s &cmd)
 
 					case PX4_CUSTOM_SUB_MODE_POSCTL_AM_POSITION:
 						desired_nav_state = vehicle_status_s::NAVIGATION_STATE_AM_POSITION;
+						break;
+
+					case PX4_CUSTOM_SUB_MODE_POSCTL_AM_TEST:
+						desired_nav_state = vehicle_status_s::NAVIGATION_STATE_AM_TEST;
 						break;
 					}
 

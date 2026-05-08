@@ -43,6 +43,17 @@
 
 using namespace px4::logger;
 
+bool LoggedTopics::has_subscription(orb_id_t id, uint8_t instance) const
+{
+	for (int i = 0; i < _subscriptions.count; ++i) {
+		if (_subscriptions.sub[i].id == static_cast<ORB_ID>(id->o_id) && _subscriptions.sub[i].instance == instance) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
 void LoggedTopics::add_default_topics()
 {
 	add_topic("action_request");
@@ -63,6 +74,11 @@ void LoggedTopics::add_default_topics()
 	add_optional_topic("external_ins_attitude");
 	add_optional_topic("external_ins_global_position");
 	add_optional_topic("external_ins_local_position");
+	add_topic("am_pos_control_status", 200);
+	add_topic("am_policy_observation");
+	add_topic("am_test_result", 100);
+	add_topic("am_test_status", 100);
+	add_topic("arm_joint_state", 100);
 	// add_optional_topic("esc_status", 250);
 	add_topic("esc_status");
 	add_topic("failure_detector_status", 100);
@@ -94,6 +110,7 @@ void LoggedTopics::add_default_topics()
 	add_topic("manual_control_setpoint", 200);
 	add_topic("manual_control_switches");
 	add_topic("mission_result");
+	add_topic("neural_control");
 	add_topic("navigator_mission_item");
 	add_topic("navigator_status");
 	add_topic("offboard_control_mode", 100);
@@ -296,7 +313,7 @@ void LoggedTopics::add_debug_topics()
 	add_topic("mag_worker_data");
 	add_topic("sensor_preflight_mag", 500);
 	add_topic("actuator_test", 500);
-	add_topic("neural_control", 50);
+	add_topic("neural_control");
 }
 
 void LoggedTopics::add_estimator_replay_topics()

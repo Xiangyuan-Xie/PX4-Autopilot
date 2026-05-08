@@ -92,6 +92,10 @@ public:
 		arm_until_shutdown,
 	};
 
+	static bool should_start_file_log(LogMode log_mode, bool arm_until_shutdown_latched, bool armed,
+					  uint8_t nav_state);
+	static bool arm_until_shutdown_latched_after_update(LogMode log_mode, bool arm_until_shutdown_latched, bool armed);
+
 	enum class PrintLoadReason {
 		Preflight,
 		Postflight,
@@ -345,6 +349,7 @@ private:
 	LogFileName					_file_name[(int)LogType::Count];
 
 	bool						_prev_file_log_start_state{false}; ///< previous state depending on logging mode (arming or aux1 state)
+	bool						_arm_until_shutdown_latched{false}; ///< true once armed in arm_until_shutdown log mode
 	bool						_manually_logging_override{false};
 
 	Statistics					_statistics[(int)LogType::Count];

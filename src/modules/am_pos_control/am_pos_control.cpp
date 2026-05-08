@@ -108,7 +108,7 @@ bool AmPosControl::anyAxisActive(const bool axes[3]) const
 	return axes[0] || axes[1] || axes[2];
 }
 
-bool AmPosControl::updateVehicleState(float &dt_s)
+bool AmPosControl::updateVehicleState(float &dt_s, bool allow_am_test_degraded, uint32_t &degraded_flags)
 {
 	if (!_angular_velocity_sub.update(&_angular_velocity)) {
 		return false;
@@ -121,7 +121,12 @@ bool AmPosControl::updateVehicleState(float &dt_s)
 	_position_sub.update(&_position);
 	_arm_joint_state_sub.update(&_arm_joint_state);
 
-	if (!vehicleStateValid()) {
+	const bool vehicle_state_valid = allow_am_test_degraded ?
+					 vehicleStateValidForAmTest(_position, attitudeValid(), angularVelocityValid(),
+							 hrt_absolute_time(), degraded_flags) :
+					 vehicleStateValid();
+
+	if (!vehicle_state_valid) {
 		return false;
 	}
 
@@ -157,19 +162,7 @@ bool AmPosControl::angularVelocityValid() const
 
 bool AmPosControl::vehicleStateValid() const
 {
-	const hrt_abstime now = hrt_absolute_time();
-
-	if ((_position.timestamp == 0) || (now > _position.timestamp + kStateTimeout)) {
-		return false;
-	}
-
-	const bool xy_valid = _position.xy_valid && PX4_ISFINITE(_position.x) && PX4_ISFINITE(_position.y);
-	const bool z_valid = _position.z_valid && PX4_ISFINITE(_position.z);
-	const bool v_xy_valid = _position.v_xy_valid && PX4_ISFINITE(_position.vx) && PX4_ISFINITE(_position.vy);
-	const bool v_z_valid = _position.v_z_valid && PX4_ISFINITE(_position.vz);
-	const bool heading_valid = PX4_ISFINITE(_position.heading);
-
-	return xy_valid && z_valid && v_xy_valid && v_z_valid && heading_valid && attitudeValid() && angularVelocityValid();
+	return vehicleStateValidStrict(_position, attitudeValid(), angularVelocityValid(), hrt_absolute_time());
 }
 
 bool AmPosControl::armStateValid() const
@@ -270,6 +263,10 @@ AmPosControl::ActiveMode AmPosControl::activeMode()
 		if (vehicle_status.nav_state == vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD) {
 			return ActiveMode::Offboard;
 		}
+
+		if (vehicle_status.nav_state == vehicle_status_s::NAVIGATION_STATE_AM_TEST) {
+			return ActiveMode::Test;
+		}
 	}
 
 	return ActiveMode::None;
@@ -295,6 +292,21 @@ void AmPosControl::publishStatus()
 	_status_pub.publish(status);
 }
 
+void AmPosControl::publishAmTestStatus(bool vehicle_state_valid, bool arm_state_valid, bool am_setpoint_valid, bool am_valid,
+				       uint32_t failure_flags, uint32_t degraded_flags)
+{
+	am_test_status_s status{};
+	status.timestamp = hrt_absolute_time();
+	status.module_running = true;
+	status.vehicle_state_valid = vehicle_state_valid;
+	status.arm_state_valid = arm_state_valid;
+	status.am_setpoint_valid = am_setpoint_valid;
+	status.am_valid = am_valid;
+	status.failure_flags = failure_flags;
+	status.degraded_flags = degraded_flags;
+	_am_test_status_pub.publish(status);
+}
+
 void AmPosControl::updateConvertedState()
 {
 	const matrix::Vector3f pos_ned(_position.x, _position.y, _position.z);
@@ -312,7 +324,17 @@ void AmPosControl::updateConvertedState()
 
 void AmPosControl::updateTargets()
 {
+	updateTargets(false);
+}
+
+void AmPosControl::updateTargets(bool use_default_am_test_setpoint)
+{
 	_trajectory_setpoint_sub.update(&_trajectory_setpoint);
+
+	if (use_default_am_test_setpoint) {
+		uint32_t unused_degraded_flags = am_test_result_s::DEGRADED_NONE;
+		fillDefaultAmTestSetpoint(_trajectory_setpoint, hrt_absolute_time(), _position, unused_degraded_flags);
+	}
 
 	matrix::Vector3f desired_pos_ned(_position.x, _position.y, _position.z);
 	for (int i = 0; i < 3; ++i) {
@@ -453,8 +475,9 @@ void AmPosControl::maybeLogPolicyDiagnostics(const RlToolsAdapter::Observation &
 		return;
 	}
 
-	const bool offboard_mode_active = activeMode() == ActiveMode::Offboard;
-	const char *mode_label = offboard_mode_active ? "AM Offboard" : "AM Position";
+	const ActiveMode mode = activeMode();
+	const char *mode_label = mode == ActiveMode::Offboard ? "AM Offboard" :
+				 mode == ActiveMode::Test ? "AM Test" : "AM Position";
 
 	float mapped_action[kActionDim]{};
 	float mapped_sum = 0.0f;
@@ -494,7 +517,50 @@ void AmPosControl::maybeLogPolicyDiagnostics(const RlToolsAdapter::Observation &
 	--_startup_diag_samples_remaining;
 }
 
-void AmPosControl::applyAction(const RlToolsAdapter::Action &action)
+void AmPosControl::publishPolicyObservation(const RlToolsAdapter::Observation &observation,
+		const RlToolsAdapter::Action &action, const actuator_motors_s &actuator_motors, uint32_t degraded_flags)
+{
+	am_policy_observation_s policy_observation{};
+	policy_observation.timestamp = actuator_motors.timestamp;
+	policy_observation.timestamp_sample = _angular_velocity.timestamp_sample;
+	policy_observation.failure_flags = 0;
+	policy_observation.degraded_flags = degraded_flags;
+	policy_observation.am_setpoint_timestamp = _trajectory_setpoint.timestamp;
+
+	for (int i = 0; i < RlToolsAdapter::ObservationDim; ++i) {
+		policy_observation.observation[i] = observation[i];
+	}
+
+	for (int i = 0; i < kActionDim; ++i) {
+		policy_observation.raw_action[i] = action[i];
+		policy_observation.mapped_action[i] = actuator_motors.control[i];
+	}
+
+	for (int i = 0; i < kMotorControlDim; ++i) {
+		policy_observation.motor_control[i] = actuator_motors.control[i];
+	}
+
+	_policy_observation_pub.publish(policy_observation);
+}
+
+void AmPosControl::publishAmTestResult(uint32_t failure_flags, uint32_t degraded_flags)
+{
+	am_test_result_s result{};
+	fillInvalidAmTestResult(result, hrt_absolute_time(), _angular_velocity.timestamp_sample, _trajectory_setpoint.timestamp,
+				failure_flags, degraded_flags);
+	_am_test_result_pub.publish(result);
+}
+
+void AmPosControl::publishAmTestResult(const RlToolsAdapter::Action &action, uint32_t degraded_flags)
+{
+	am_test_result_s result{};
+	fillAmTestResultFromAction(result, hrt_absolute_time(), _angular_velocity.timestamp_sample, _trajectory_setpoint.timestamp,
+				   action, degraded_flags);
+	_am_test_result_pub.publish(result);
+}
+
+void AmPosControl::applyAction(const RlToolsAdapter::Observation &observation, const RlToolsAdapter::Action &action,
+			       bool publish_outputs, uint32_t degraded_flags)
 {
 	actuator_motors_s actuator_motors{};
 	actuator_motors.timestamp = hrt_absolute_time();
@@ -510,7 +576,11 @@ void AmPosControl::applyAction(const RlToolsAdapter::Action &action)
 	}
 
 	actuator_motors.reversible_flags = 0;
-	_actuator_motors_pub.publish(actuator_motors);
+	publishPolicyObservation(observation, action, actuator_motors, degraded_flags);
+
+	if (publish_outputs) {
+		_actuator_motors_pub.publish(actuator_motors);
+	}
 }
 
 void AmPosControl::publishStopSetpoint()
@@ -544,8 +614,12 @@ void AmPosControl::Run()
 	if (_vehicle_status_sub.updated()) {
 		_vehicle_status_sub.copy(&vehicle_status);
 		_use_am_mode = vehicle_status.nav_state == vehicle_status_s::NAVIGATION_STATE_AM_POSITION
-			       || vehicle_status.nav_state == vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD;
+			       || vehicle_status.nav_state == vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD
+			       || vehicle_status.nav_state == vehicle_status_s::NAVIGATION_STATE_AM_TEST;
 	}
+
+	const ActiveMode mode = activeMode();
+	const bool am_test_mode = mode == ActiveMode::Test;
 
 	if (_parameter_update_sub.updated()) {
 		parameter_update_s param_update{};
@@ -570,7 +644,7 @@ void AmPosControl::Run()
 		return;
 	}
 
-	if (activeMode() == ActiveMode::Offboard) {
+	if (mode == ActiveMode::Offboard) {
 		_offboard_control_mode_sub.update(&_offboard_control_mode);
 
 		if (!offboardControlModeValid()) {
@@ -588,11 +662,21 @@ void AmPosControl::Run()
 		}
 	}
 
+	uint32_t am_test_degraded_flags = am_test_result_s::DEGRADED_NONE;
 	float dt_s = 0.0f;
-	if (!updateVehicleState(dt_s)) {
+	if (!updateVehicleState(dt_s, am_test_mode, am_test_degraded_flags)) {
 		_adapter.reset();
 		resetCommandReference();
-		publishStopSetpoint();
+
+		if (am_test_mode) {
+			publishAmTestStatus(false, false, false, false, am_test_result_s::FAILURE_VEHICLE_STATE_INVALID,
+					    am_test_degraded_flags);
+			publishAmTestResult(am_test_result_s::FAILURE_VEHICLE_STATE_INVALID, am_test_degraded_flags);
+
+		} else {
+			publishStopSetpoint();
+		}
+
 		perf_end(_loop_perf);
 		return;
 	}
@@ -600,31 +684,46 @@ void AmPosControl::Run()
 	if (!armStateValid()) {
 		_adapter.reset();
 		resetCommandReference();
-		publishStopSetpoint();
+
+		if (am_test_mode) {
+			publishAmTestStatus(true, false, false, false, am_test_result_s::FAILURE_ARM_STATE_INVALID,
+					    am_test_degraded_flags);
+			publishAmTestResult(am_test_result_s::FAILURE_ARM_STATE_INVALID, am_test_degraded_flags);
+
+		} else {
+			publishStopSetpoint();
+		}
+
 		perf_end(_loop_perf);
 		return;
 	}
 
 	_trajectory_setpoint_sub.update(&_trajectory_setpoint);
 
-	const bool trajectory_setpoint_valid = activeMode() == ActiveMode::Offboard ? offboardTrajectorySetpointValid() :
+	const bool trajectory_setpoint_valid = mode == ActiveMode::Offboard ? offboardTrajectorySetpointValid() :
 					       trajectorySetpointValid();
+	bool use_default_am_test_setpoint = false;
 
 	if (!trajectory_setpoint_valid) {
-		_adapter.reset();
-		resetCommandReference();
-
 		if (hrt_elapsed_time(&_last_setpoint_diag) > 1_s) {
 			_last_setpoint_diag = hrt_absolute_time();
 			PX4_WARN("AM Position waiting for fresh trajectory_setpoint");
 		}
 
-		publishStopSetpoint();
-		perf_end(_loop_perf);
-		return;
+		if (am_test_mode) {
+			use_default_am_test_setpoint = true;
+			am_test_degraded_flags |= am_test_result_s::DEGRADED_SETPOINT_DEFAULTED;
+
+		} else {
+			_adapter.reset();
+			resetCommandReference();
+			publishStopSetpoint();
+			perf_end(_loop_perf);
+			return;
+		}
 	}
 
-	updateTargets();
+	updateTargets(use_default_am_test_setpoint);
 
 	RlToolsAdapter::Observation observation{};
 	buildObservation(observation);
@@ -632,11 +731,25 @@ void AmPosControl::Run()
 	RlToolsAdapter::Action action{};
 	if (_adapter.infer(hrt_absolute_time(), observation, action)) {
 		maybeLogPolicyDiagnostics(observation, action);
-		applyAction(action);
+		applyAction(observation, action, !am_test_mode, am_test_degraded_flags);
+
+		if (am_test_mode) {
+			publishAmTestStatus(true, true, true, true, am_test_result_s::FAILURE_NONE, am_test_degraded_flags);
+			publishAmTestResult(action, am_test_degraded_flags);
+		}
+
 		updateActionHistory(action);
 
 	} else {
-		publishStopSetpoint();
+		if (am_test_mode) {
+			publishAmTestStatus(true, true, true, false, am_test_result_s::FAILURE_AM_INFERENCE_FAILED,
+					    am_test_degraded_flags);
+			publishAmTestResult(am_test_result_s::FAILURE_AM_INFERENCE_FAILED, am_test_degraded_flags);
+
+		} else {
+			publishStopSetpoint();
+		}
+
 		resetCommandReference();
 	}
 

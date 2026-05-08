@@ -36,3 +36,4 @@ target_compile_features(am_pos_control_policy_blob INTERFACE cxx_std_17)
 target_compile_options(am_pos_control_policy_blob INTERFACE -Wno-unused-local-typedefs)
 
 px4_add_unit_gtest(SRC am_pos_control_policy_blob_test.cpp LINKLIBS am_pos_control_policy_blob)
+px4_add_unit_gtest(SRC am_pos_control_test.cpp LINKLIBS am_pos_control_policy_blob)

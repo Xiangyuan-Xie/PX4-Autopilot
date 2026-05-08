@@ -60,3 +60,6 @@ px4_add_module(
 		version
 		component_general_json # for checksums.h
 	)
+
+px4_add_unit_gtest(SRC logged_topics_test.cpp EXTRA_SRCS ../../../platforms/posix/src/px4/common/test_stubs/stub_daemon.cpp LINKLIBS modules__logger)
+px4_add_unit_gtest(SRC log_mode_test.cpp EXTRA_SRCS ../../../platforms/posix/src/px4/common/test_stubs/stub_daemon.cpp COMPILE_FLAGS -DPX4_BOARD_NAME=\"PX4_SITL\" -DPX4_BOARD_LABEL=\"test\" LINKLIBS modules__logger)

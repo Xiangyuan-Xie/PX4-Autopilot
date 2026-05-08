@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "mode_requirements.hpp"
+#include <lib/modes/ui.hpp>
 #include <uORB/topics/vehicle_status.h>
 
 TEST(ModeRequirementsTest, AddsAmPositionRequirementsForDedicatedInternalNavState)
@@ -33,4 +34,21 @@ TEST(ModeRequirementsTest, AddsAmOffboardRequirementsForDedicatedInternalNavStat
 	EXPECT_NE(flags.mode_req_local_alt & am_offboard_mask, 0u);
 	EXPECT_NE(flags.mode_req_offboard_signal & am_offboard_mask, 0u);
 	EXPECT_NE(flags.mode_req_other & am_offboard_mask, 0u);
+}
+
+TEST(ModeRequirementsTest, AmTestIsExternallySelectableAndDoesNotPreventArming)
+{
+	failsafe_flags_s flags{};
+
+	mode_util::getModeRequirements(vehicle_status_s::VEHICLE_TYPE_ROTARY_WING, flags);
+
+	const uint32_t am_test_mask = 1u << vehicle_status_s::NAVIGATION_STATE_AM_TEST;
+
+	EXPECT_EQ(flags.mode_req_prevent_arming & am_test_mask, 0u);
+	EXPECT_EQ(mode_util::getValidNavStates() & am_test_mask, am_test_mask);
+}
+
+TEST(ModeRequirementsTest, AmTestIsAdvertisedAsRegularMode)
+{
+	EXPECT_FALSE(mode_util::isAdvanced(vehicle_status_s::NAVIGATION_STATE_AM_TEST));
 }

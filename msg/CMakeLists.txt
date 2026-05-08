@@ -45,6 +45,9 @@ set(msg_files
 	ActuatorTest.msg
 	AdcReport.msg
 	AmPosControlStatus.msg
+	AmPolicyObservation.msg
+	AmTestResult.msg
+	AmTestStatus.msg
 	ArmJointState.msg
 	Airspeed.msg
 	AirspeedWind.msg
