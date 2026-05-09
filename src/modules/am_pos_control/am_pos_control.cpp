@@ -416,6 +416,8 @@ void AmPosControl::updateTargets(bool use_default_am_test_setpoint)
 
 	const matrix::Vector3f desired_vel_w = positionNedToEnu(desired_vel_ned);
 	const matrix::Vector3f desired_lin_vel_b = _root_quat_w.inversed().rotateVector(desired_vel_w);
+	const matrix::Quatf heading_quat_w = yawOnlyQuat(_heading_w);
+	const matrix::Vector3f desired_lin_vel_h = heading_quat_w.inversed().rotateVector(desired_vel_w);
 	matrix::Vector3f desired_ang_vel_b{};
 	desired_ang_vel_b.zero();
 
@@ -429,9 +431,9 @@ void AmPosControl::updateTargets(bool use_default_am_test_setpoint)
 	const matrix::Vector3f desired_pos_w = positionNedToEnu(desired_pos_ned);
 
 	const bool lin_active[3]{
-		PX4_ISFINITE(_trajectory_setpoint.velocity[0]) && fabsf(desired_lin_vel_b(0)) > kCmdZeroEps,
-		PX4_ISFINITE(_trajectory_setpoint.velocity[1]) && fabsf(desired_lin_vel_b(1)) > kCmdZeroEps,
-		PX4_ISFINITE(_trajectory_setpoint.velocity[2]) && fabsf(desired_lin_vel_b(2)) > kCmdZeroEps,
+		fabsf(desired_lin_vel_h(0)) > kCmdZeroEps,
+		fabsf(desired_lin_vel_h(1)) > kCmdZeroEps,
+		fabsf(desired_lin_vel_h(2)) > kCmdZeroEps,
 	};
 
 	const bool ang_active[3]{
@@ -462,14 +464,9 @@ void AmPosControl::buildObservation(RlToolsAdapter::Observation &observation)
 	const matrix::Quatf &root_quat_w = _root_quat_w;
 	const matrix::Vector3f &lin_vel_b = _root_lin_vel_b;
 	const matrix::Vector3f &ang_vel_b = _root_ang_vel_b;
-	const matrix::Vector3f pos_err_b = root_quat_w.inversed().rotateVector(_current_cmd_ref.desired_pos_w - root_pos_w);
-
-	matrix::Vector3f gated_pos_err_b(pos_err_b);
-	for (int i = 0; i < 3; ++i) {
-		if (_current_cmd_ref.lin_cmd_active[i]) {
-			gated_pos_err_b(i) = 0.0f;
-		}
-	}
+	const matrix::Vector3f gated_pos_err_b = gatePositionErrorForPolicy(
+			_current_cmd_ref.desired_pos_w - root_pos_w, root_quat_w, yawOnlyQuat(_heading_w),
+			_current_cmd_ref.lin_cmd_active);
 
 	const matrix::Quatf att_err_quat = root_quat_w.inversed() * _current_cmd_ref.desired_quat_w;
 	matrix::Eulerf att_err_euler(att_err_quat);
@@ -653,11 +650,9 @@ void AmPosControl::applyAction(const RlToolsAdapter::Observation &observation, c
 
 	if (publish_outputs && manual_takeoff_release_active) {
 		applyMotorRelease(actuator_motors, _manual_takeoff_release);
-		fillActionHistoryFromMotors(executed_action, actuator_motors);
 
 	} else if (publish_outputs && _takeoff.getTakeoffState() == TakeoffState::rampup) {
 		rampMotorOutputsForTakeoff(actuator_motors, _takeoff_output_ramp_progress);
-		fillActionHistoryFromMotors(executed_action, actuator_motors);
 	}
 
 	actuator_motors.reversible_flags = 0;

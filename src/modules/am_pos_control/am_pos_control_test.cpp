@@ -290,6 +290,36 @@ TEST(AmPosControlTest, ApplyMotorReleaseScalesPolicyMotorsAndPreservesNanChannel
 	}
 }
 
+TEST(AmPosControlTest, GatedPositionErrorKeepsHorizontalHoldForTiltedVerticalVelocityCommand)
+{
+	const float pitch = 0.35f;
+	const matrix::Quatf root_quat(matrix::Eulerf(0.f, pitch, 0.f));
+	const matrix::Quatf heading_quat(matrix::Eulerf(0.f, 0.f, 0.f));
+	const matrix::Vector3f pos_error_w{1.f, 0.f, 0.f};
+	const bool active_h[3]{false, false, true};
+
+	const matrix::Vector3f gated_pos_error_b =
+		AmPosControl::gatePositionErrorForPolicy(pos_error_w, root_quat, heading_quat, active_h);
+
+	EXPECT_GT(gated_pos_error_b.length(), 0.9f);
+	EXPECT_NEAR(gated_pos_error_b(0), cosf(pitch), 1e-5f);
+}
+
+TEST(AmPosControlTest, GatedPositionErrorZeroesOnlyCommandedHeadingAxis)
+{
+	const matrix::Quatf root_quat(matrix::Eulerf(0.f, 0.f, 0.f));
+	const matrix::Quatf heading_quat(matrix::Eulerf(0.f, 0.f, 0.f));
+	const matrix::Vector3f pos_error_w{1.f, 2.f, 3.f};
+	const bool active_h[3]{true, false, false};
+
+	const matrix::Vector3f gated_pos_error_b =
+		AmPosControl::gatePositionErrorForPolicy(pos_error_w, root_quat, heading_quat, active_h);
+
+	EXPECT_NEAR(gated_pos_error_b(0), 0.f, 1e-6f);
+	EXPECT_NEAR(gated_pos_error_b(1), 2.f, 1e-6f);
+	EXPECT_NEAR(gated_pos_error_b(2), 3.f, 1e-6f);
+}
+
 TEST(AmPosControlTest, InverseMappedMotorToActionIsFiniteNearOutputLimits)
 {
 	EXPECT_TRUE(std::isfinite(AmPosControl::inverseMappedMotorToAction(0.0f)));
