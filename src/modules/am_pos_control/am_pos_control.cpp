@@ -75,6 +75,10 @@ bool AmPosControl::init()
 		return false;
 	}
 
+	_takeoff_status_pub.advertise();
+	_takeoff.setSpoolupTime(_param_com_spoolup_time.get());
+	_takeoff.setTakeoffRampTime(_param_mpc_tko_ramp_t.get());
+
 	return _adapter.init();
 }
 
@@ -90,17 +94,79 @@ void AmPosControl::resetState()
 	_attitude = {};
 	_angular_velocity = {};
 	_arm_joint_state = {};
-	for (int i = 0; i < kActionDim; ++i) {
-		_prev_action[i] = 0.0f;
-	}
+	_vehicle_constraints = {0, NAN, NAN, false, {}};
+	_vehicle_control_mode = {};
+	_vehicle_land_detected = {
+		.timestamp = 0,
+		.freefall = false,
+		.ground_contact = true,
+		.maybe_landed = true,
+		.landed = true,
+	};
+	resetActionHistory();
 	_root_pos_w.zero();
 	_root_quat_w = matrix::Quatf();
 	_root_lin_vel_w.zero();
 	_root_lin_vel_b.zero();
 	_root_ang_vel_b.zero();
 	_heading_w = 0.0f;
+	_takeoff_output_ramp_progress = 0.0f;
+	_manual_takeoff_release = 0.0f;
 	resetCommandReference();
 	_adapter.reset();
+}
+
+void AmPosControl::publishTakeoffStatus()
+{
+	const uint8_t takeoff_state = static_cast<uint8_t>(_takeoff.getTakeoffState());
+
+	if (takeoff_state != _takeoff_status_pub.get().takeoff_state) {
+		_takeoff_status_pub.get().takeoff_state = takeoff_state;
+		_takeoff_status_pub.get().tilt_limit = NAN;
+		_takeoff_status_pub.get().timestamp = hrt_absolute_time();
+		_takeoff_status_pub.update();
+	}
+}
+
+bool AmPosControl::updateTakeoffGate(ActiveMode mode, bool was_using_am_mode, float dt_s)
+{
+	_vehicle_control_mode_sub.update(&_vehicle_control_mode);
+	_vehicle_land_detected_sub.update(&_vehicle_land_detected);
+	_vehicle_constraints_sub.update(&_vehicle_constraints);
+
+	bool want_takeoff = _vehicle_constraints.want_takeoff;
+	float speed_up = PX4_ISFINITE(_vehicle_constraints.speed_up) ? _vehicle_constraints.speed_up : _param_ampc_z_vel_up.get();
+
+	_manual_takeoff_release = 1.0f;
+
+	if (mode == ActiveMode::Manual) {
+		_sticks.checkAndUpdateStickInputs();
+		_manual_takeoff_release = manualTakeoffReleaseFromThrottle(_sticks.getThrottleZeroCentered(),
+				       _param_ampc_man_dz.get());
+		want_takeoff = _manual_takeoff_release > 0.0f;
+	}
+
+	if (mode == ActiveMode::Offboard) {
+		want_takeoff = offboardSetpointWantsTakeoff(_trajectory_setpoint, _position, _position.timestamp_sample);
+		speed_up = _param_ampc_z_vel_up.get();
+	}
+
+	const bool skip_takeoff = shouldSkipTakeoffRampOnAmModeEntry(_use_am_mode, was_using_am_mode,
+				   _vehicle_land_detected.landed);
+	_takeoff.updateTakeoffState(_vehicle_control_mode.flag_armed, _vehicle_land_detected.landed,
+				    want_takeoff, speed_up, skip_takeoff, _position.timestamp_sample);
+
+	if (_takeoff.getTakeoffState() >= TakeoffState::rampup) {
+		_takeoff.updateRamp(dt_s, speed_up);
+	}
+
+	_takeoff_output_ramp_progress = advanceAmTakeoffRampProgress(_takeoff_output_ramp_progress, dt_s,
+				       _param_mpc_tko_ramp_t.get(), static_cast<uint8_t>(_takeoff.getTakeoffState()), skip_takeoff);
+
+	publishTakeoffStatus();
+
+	return takeoffStateRequiresOutputGate(static_cast<uint8_t>(_takeoff.getTakeoffState()),
+					      _vehicle_land_detected.ground_contact);
 }
 
 bool AmPosControl::anyAxisActive(const bool axes[3]) const
@@ -469,6 +535,13 @@ void AmPosControl::updateActionHistory(const RlToolsAdapter::Action &action)
 	}
 }
 
+void AmPosControl::resetActionHistory()
+{
+	for (int i = 0; i < kActionDim; ++i) {
+		_prev_action[i] = 0.0f;
+	}
+}
+
 void AmPosControl::maybeLogPolicyDiagnostics(const RlToolsAdapter::Observation &observation, const RlToolsAdapter::Action &action)
 {
 	if (_startup_diag_samples_remaining <= 0) {
@@ -560,19 +633,31 @@ void AmPosControl::publishAmTestResult(const RlToolsAdapter::Action &action, uin
 }
 
 void AmPosControl::applyAction(const RlToolsAdapter::Observation &observation, const RlToolsAdapter::Action &action,
-			       bool publish_outputs, uint32_t degraded_flags)
+			       RlToolsAdapter::Action &executed_action, ActiveMode mode, bool publish_outputs,
+			       uint32_t degraded_flags)
 {
 	actuator_motors_s actuator_motors{};
 	actuator_motors.timestamp = hrt_absolute_time();
 	actuator_motors.timestamp_sample = actuator_motors.timestamp;
 
 	for (int i = 0; i < kActionDim; ++i) {
-		const float mapped = 1.0f / (1.0f + expf(-2.0f * action[i]));
-		actuator_motors.control[i] = math::constrain(mapped, 0.0f, 1.0f);
+		actuator_motors.control[i] = mapActionToMotor(action[i]);
+		executed_action[i] = action[i];
 	}
 
 	for (int i = kActionDim; i < kMotorControlDim; ++i) {
 		actuator_motors.control[i] = NAN;
+	}
+
+	const bool manual_takeoff_release_active = mode == ActiveMode::Manual && _takeoff.getTakeoffState() < TakeoffState::flight;
+
+	if (publish_outputs && manual_takeoff_release_active) {
+		applyMotorRelease(actuator_motors, _manual_takeoff_release);
+		fillActionHistoryFromMotors(executed_action, actuator_motors);
+
+	} else if (publish_outputs && _takeoff.getTakeoffState() == TakeoffState::rampup) {
+		rampMotorOutputsForTakeoff(actuator_motors, _takeoff_output_ramp_progress);
+		fillActionHistoryFromMotors(executed_action, actuator_motors);
 	}
 
 	actuator_motors.reversible_flags = 0;
@@ -580,6 +665,11 @@ void AmPosControl::applyAction(const RlToolsAdapter::Observation &observation, c
 
 	if (publish_outputs) {
 		_actuator_motors_pub.publish(actuator_motors);
+
+		vehicle_thrust_setpoint_s thrust_setpoint{};
+		fillThrustSetpointFromMotors(thrust_setpoint, actuator_motors.timestamp, actuator_motors.timestamp_sample,
+					     actuator_motors);
+		_vehicle_thrust_setpoint_pub.publish(thrust_setpoint);
 	}
 }
 
@@ -595,6 +685,24 @@ void AmPosControl::publishStopSetpoint()
 
 	actuator_motors.reversible_flags = 0;
 	_actuator_motors_pub.publish(actuator_motors);
+
+	vehicle_thrust_setpoint_s thrust_setpoint{};
+	fillThrustSetpointFromMotors(thrust_setpoint, actuator_motors.timestamp, actuator_motors.timestamp_sample,
+				     actuator_motors);
+	_vehicle_thrust_setpoint_pub.publish(thrust_setpoint);
+}
+
+void AmPosControl::publishIdleSetpoint()
+{
+	actuator_motors_s actuator_motors{};
+	const hrt_abstime now = hrt_absolute_time();
+	fillIdleMotorSetpoint(actuator_motors, now, now);
+	_actuator_motors_pub.publish(actuator_motors);
+
+	vehicle_thrust_setpoint_s thrust_setpoint{};
+	fillThrustSetpointFromMotors(thrust_setpoint, actuator_motors.timestamp, actuator_motors.timestamp_sample,
+				     actuator_motors);
+	_vehicle_thrust_setpoint_pub.publish(thrust_setpoint);
 }
 
 void AmPosControl::Run()
@@ -625,10 +733,14 @@ void AmPosControl::Run()
 		parameter_update_s param_update{};
 		_parameter_update_sub.copy(&param_update);
 		updateParams();
+		_takeoff.setSpoolupTime(_param_com_spoolup_time.get());
+		_takeoff.setTakeoffRampTime(_param_mpc_tko_ramp_t.get());
 	}
 
 	if (_use_am_mode && !was_using_am_mode) {
 		resetCommandReference();
+		resetActionHistory();
+		_takeoff_output_ramp_progress = 0.0f;
 		_adapter.reset();
 		_startup_diag_samples_remaining = kStartupDiagSamples;
 	}
@@ -637,6 +749,8 @@ void AmPosControl::Run()
 		if (was_using_am_mode) {
 			publishStopSetpoint();
 			resetCommandReference();
+			resetActionHistory();
+			_takeoff_output_ramp_progress = 0.0f;
 			_adapter.reset();
 		}
 
@@ -723,6 +837,15 @@ void AmPosControl::Run()
 		}
 	}
 
+	if (!am_test_mode && updateTakeoffGate(mode, was_using_am_mode, dt_s)) {
+		_adapter.reset();
+		resetCommandReference();
+		resetActionHistory();
+		publishIdleSetpoint();
+		perf_end(_loop_perf);
+		return;
+	}
+
 	updateTargets(use_default_am_test_setpoint);
 
 	RlToolsAdapter::Observation observation{};
@@ -731,14 +854,15 @@ void AmPosControl::Run()
 	RlToolsAdapter::Action action{};
 	if (_adapter.infer(hrt_absolute_time(), observation, action)) {
 		maybeLogPolicyDiagnostics(observation, action);
-		applyAction(observation, action, !am_test_mode, am_test_degraded_flags);
+		RlToolsAdapter::Action executed_action{};
+		applyAction(observation, action, executed_action, mode, !am_test_mode, am_test_degraded_flags);
 
 		if (am_test_mode) {
 			publishAmTestStatus(true, true, true, true, am_test_result_s::FAILURE_NONE, am_test_degraded_flags);
 			publishAmTestResult(action, am_test_degraded_flags);
 		}
 
-		updateActionHistory(action);
+		updateActionHistory(executed_action);
 
 	} else {
 		if (am_test_mode) {
@@ -751,6 +875,7 @@ void AmPosControl::Run()
 		}
 
 		resetCommandReference();
+		resetActionHistory();
 	}
 
 	perf_end(_loop_perf);

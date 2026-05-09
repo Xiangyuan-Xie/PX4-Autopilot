@@ -657,14 +657,10 @@ transition_result_t Commander::disarm(arm_disarm_reason_t calling_reason, bool f
 	if (!forced) {
 		const bool landed = (_vehicle_land_detected.landed || _vehicle_land_detected.maybe_landed
 				     || is_ground_vehicle(_vehicle_status));
-		const bool mc_manual_thrust_mode = _vehicle_status.vehicle_type == vehicle_status_s::VEHICLE_TYPE_ROTARY_WING
-						   && _vehicle_control_mode.flag_control_manual_enabled
-						   && !_vehicle_control_mode.flag_control_climb_rate_enabled;
-		const bool commanded_by_rc = (calling_reason == arm_disarm_reason_t::stick_gesture)
-					     || (calling_reason == arm_disarm_reason_t::rc_switch)
-					     || (calling_reason == arm_disarm_reason_t::rc_button);
+		const bool manual_disarm_in_air_allowed = manualDisarmInAirAllowed(_vehicle_status, _vehicle_control_mode,
+				calling_reason, _param_com_disarm_man.get());
 
-		if (!landed && !(mc_manual_thrust_mode && commanded_by_rc && _param_com_disarm_man.get())) {
+		if (!landed && !manual_disarm_in_air_allowed) {
 			if (calling_reason != arm_disarm_reason_t::stick_gesture) {
 				mavlink_log_critical(&_mavlink_log_pub, "Disarming denied: not landed\t");
 				events::send(events::ID("commander_disarm_denied_not_landed"),

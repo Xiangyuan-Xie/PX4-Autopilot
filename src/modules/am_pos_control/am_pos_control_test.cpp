@@ -173,3 +173,271 @@ TEST(AmPosControlTest, FillDefaultAmTestSetpointUsesCurrentPoseAndMarksDegraded)
 	EXPECT_FLOAT_EQ(setpoint.yawspeed, 0.0f);
 	EXPECT_EQ(degraded_flags, am_test_result_s::DEGRADED_SETPOINT_DEFAULTED);
 }
+
+TEST(AmPosControlTest, FillThrustSetpointFromMotorsAveragesFourMotorCommands)
+{
+	actuator_motors_s actuator_motors{};
+	actuator_motors.control[0] = 0.8f;
+	actuator_motors.control[1] = 0.6f;
+	actuator_motors.control[2] = 0.4f;
+	actuator_motors.control[3] = 0.2f;
+
+	vehicle_thrust_setpoint_s thrust_setpoint{};
+	AmPosControl::fillThrustSetpointFromMotors(thrust_setpoint, 2000, 1500, actuator_motors);
+
+	EXPECT_EQ(thrust_setpoint.timestamp, 2000);
+	EXPECT_EQ(thrust_setpoint.timestamp_sample, 1500);
+	EXPECT_FLOAT_EQ(thrust_setpoint.xyz[0], 0.0f);
+	EXPECT_FLOAT_EQ(thrust_setpoint.xyz[1], 0.0f);
+	EXPECT_FLOAT_EQ(thrust_setpoint.xyz[2], -0.5f);
+}
+
+TEST(AmPosControlTest, FillThrustSetpointFromMotorsIgnoresNanCommands)
+{
+	actuator_motors_s actuator_motors{};
+	actuator_motors.control[0] = 0.8f;
+	actuator_motors.control[1] = NAN;
+	actuator_motors.control[2] = 0.4f;
+	actuator_motors.control[3] = NAN;
+
+	vehicle_thrust_setpoint_s thrust_setpoint{};
+	AmPosControl::fillThrustSetpointFromMotors(thrust_setpoint, 2000, 1500, actuator_motors);
+
+	EXPECT_FLOAT_EQ(thrust_setpoint.xyz[0], 0.0f);
+	EXPECT_FLOAT_EQ(thrust_setpoint.xyz[1], 0.0f);
+	EXPECT_FLOAT_EQ(thrust_setpoint.xyz[2], -0.6f);
+}
+
+TEST(AmPosControlTest, FillThrustSetpointFromMotorsPublishesZeroWhenAllCommandsAreNan)
+{
+	actuator_motors_s actuator_motors{};
+
+	for (float &control : actuator_motors.control) {
+		control = NAN;
+	}
+
+	vehicle_thrust_setpoint_s thrust_setpoint{};
+	AmPosControl::fillThrustSetpointFromMotors(thrust_setpoint, 2000, 1500, actuator_motors);
+
+	EXPECT_FLOAT_EQ(thrust_setpoint.xyz[0], 0.0f);
+	EXPECT_FLOAT_EQ(thrust_setpoint.xyz[1], 0.0f);
+	EXPECT_FLOAT_EQ(thrust_setpoint.xyz[2], 0.0f);
+}
+
+TEST(AmPosControlTest, FillIdleMotorSetpointCommandsIdleForPolicyMotors)
+{
+	actuator_motors_s actuator_motors{};
+	AmPosControl::fillIdleMotorSetpoint(actuator_motors, 2000, 1500);
+
+	EXPECT_EQ(actuator_motors.timestamp, 2000);
+	EXPECT_EQ(actuator_motors.timestamp_sample, 1500);
+	EXPECT_EQ(actuator_motors.reversible_flags, 0u);
+
+	for (int i = 0; i < 4; ++i) {
+		EXPECT_FLOAT_EQ(actuator_motors.control[i], 0.0f);
+	}
+
+	for (int i = 4; i < 12; ++i) {
+		EXPECT_TRUE(std::isnan(actuator_motors.control[i]));
+	}
+}
+
+TEST(AmPosControlTest, IdleMotorSetpointPublishesZeroThrustIntent)
+{
+	actuator_motors_s actuator_motors{};
+	AmPosControl::fillIdleMotorSetpoint(actuator_motors, 2000, 1500);
+
+	vehicle_thrust_setpoint_s thrust_setpoint{};
+	AmPosControl::fillThrustSetpointFromMotors(thrust_setpoint, 2000, 1500, actuator_motors);
+
+	EXPECT_FLOAT_EQ(thrust_setpoint.xyz[0], 0.0f);
+	EXPECT_FLOAT_EQ(thrust_setpoint.xyz[1], 0.0f);
+	EXPECT_FLOAT_EQ(thrust_setpoint.xyz[2], 0.0f);
+}
+
+TEST(AmPosControlTest, ManualTakeoffReleaseFollowsThrottleFromMinimumToCenter)
+{
+	const float deadzone = 0.1f;
+
+	EXPECT_FLOAT_EQ(AmPosControl::manualTakeoffReleaseFromThrottle(-1.0f, deadzone), 0.0f);
+	EXPECT_FLOAT_EQ(AmPosControl::manualTakeoffReleaseFromThrottle(-0.9f, deadzone), 0.0f);
+	EXPECT_NEAR(AmPosControl::manualTakeoffReleaseFromThrottle(-0.45f, deadzone), 0.5f, 1e-6f);
+	EXPECT_FLOAT_EQ(AmPosControl::manualTakeoffReleaseFromThrottle(0.0f, deadzone), 1.0f);
+	EXPECT_FLOAT_EQ(AmPosControl::manualTakeoffReleaseFromThrottle(0.5f, deadzone), 1.0f);
+}
+
+TEST(AmPosControlTest, ApplyMotorReleaseScalesPolicyMotorsAndPreservesNanChannels)
+{
+	actuator_motors_s actuator_motors{};
+	actuator_motors.control[0] = 0.8f;
+	actuator_motors.control[1] = 0.6f;
+	actuator_motors.control[2] = 0.4f;
+	actuator_motors.control[3] = 0.2f;
+
+	for (int i = 4; i < 12; ++i) {
+		actuator_motors.control[i] = NAN;
+	}
+
+	AmPosControl::applyMotorRelease(actuator_motors, 0.5f);
+
+	EXPECT_FLOAT_EQ(actuator_motors.control[0], 0.4f);
+	EXPECT_FLOAT_EQ(actuator_motors.control[1], 0.3f);
+	EXPECT_FLOAT_EQ(actuator_motors.control[2], 0.2f);
+	EXPECT_FLOAT_EQ(actuator_motors.control[3], 0.1f);
+
+	for (int i = 4; i < 12; ++i) {
+		EXPECT_TRUE(std::isnan(actuator_motors.control[i]));
+	}
+}
+
+TEST(AmPosControlTest, InverseMappedMotorToActionIsFiniteNearOutputLimits)
+{
+	EXPECT_TRUE(std::isfinite(AmPosControl::inverseMappedMotorToAction(0.0f)));
+	EXPECT_TRUE(std::isfinite(AmPosControl::inverseMappedMotorToAction(1.0f)));
+	EXPECT_NEAR(AmPosControl::inverseMappedMotorToAction(0.5f), 0.0f, 1e-6f);
+}
+
+TEST(AmPosControlTest, FillActionHistoryFromMotorsUsesExecutedMotorCommands)
+{
+	actuator_motors_s actuator_motors{};
+	actuator_motors.control[0] = 0.4f;
+	actuator_motors.control[1] = 0.3f;
+	actuator_motors.control[2] = 0.2f;
+	actuator_motors.control[3] = 0.1f;
+
+	RlToolsAdapter::Action action{};
+	AmPosControl::fillActionHistoryFromMotors(action, actuator_motors);
+
+	for (int i = 0; i < 4; ++i) {
+		const float remapped = 1.0f / (1.0f + expf(-2.0f * action[i]));
+		EXPECT_NEAR(remapped, actuator_motors.control[i], 1e-5f);
+	}
+}
+
+TEST(AmPosControlTest, RampMotorOutputsForTakeoffScalesCollectiveAndDifferential)
+{
+	actuator_motors_s actuator_motors{};
+	actuator_motors.control[0] = 0.8f;
+	actuator_motors.control[1] = 0.6f;
+	actuator_motors.control[2] = 0.4f;
+	actuator_motors.control[3] = 0.2f;
+
+	for (int i = 4; i < 12; ++i) {
+		actuator_motors.control[i] = NAN;
+	}
+
+	AmPosControl::rampMotorOutputsForTakeoff(actuator_motors, 0.5f);
+
+	EXPECT_FLOAT_EQ(actuator_motors.control[0], 0.4f);
+	EXPECT_FLOAT_EQ(actuator_motors.control[1], 0.3f);
+	EXPECT_FLOAT_EQ(actuator_motors.control[2], 0.2f);
+	EXPECT_FLOAT_EQ(actuator_motors.control[3], 0.1f);
+
+	for (int i = 4; i < 12; ++i) {
+		EXPECT_TRUE(std::isnan(actuator_motors.control[i]));
+	}
+}
+
+TEST(AmPosControlTest, RampMotorOutputsForTakeoffZeroAndFullProgress)
+{
+	actuator_motors_s zero_progress{};
+	actuator_motors_s full_progress{};
+
+	for (int i = 0; i < 4; ++i) {
+		zero_progress.control[i] = 0.7f - 0.1f * i;
+		full_progress.control[i] = zero_progress.control[i];
+	}
+
+	for (int i = 4; i < 12; ++i) {
+		zero_progress.control[i] = NAN;
+		full_progress.control[i] = NAN;
+	}
+
+	AmPosControl::rampMotorOutputsForTakeoff(zero_progress, 0.0f);
+	AmPosControl::rampMotorOutputsForTakeoff(full_progress, 1.0f);
+
+	for (int i = 0; i < 4; ++i) {
+		EXPECT_FLOAT_EQ(zero_progress.control[i], 0.0f);
+		EXPECT_FLOAT_EQ(full_progress.control[i], 0.7f - 0.1f * i);
+	}
+}
+
+TEST(AmPosControlTest, AdvanceAmTakeoffRampProgressFollowsTakeoffState)
+{
+	EXPECT_FLOAT_EQ(AmPosControl::advanceAmTakeoffRampProgress(0.8f, 0.1f, 1.0f,
+			takeoff_status_s::TAKEOFF_STATE_READY_FOR_TAKEOFF, false), 0.0f);
+	EXPECT_FLOAT_EQ(AmPosControl::advanceAmTakeoffRampProgress(0.2f, 0.1f, 1.0f,
+			takeoff_status_s::TAKEOFF_STATE_RAMPUP, false), 0.3f);
+	EXPECT_FLOAT_EQ(AmPosControl::advanceAmTakeoffRampProgress(0.95f, 0.1f, 1.0f,
+			takeoff_status_s::TAKEOFF_STATE_RAMPUP, false), 1.0f);
+	EXPECT_FLOAT_EQ(AmPosControl::advanceAmTakeoffRampProgress(0.2f, 0.1f, 1.0f,
+			takeoff_status_s::TAKEOFF_STATE_FLIGHT, false), 1.0f);
+	EXPECT_FLOAT_EQ(AmPosControl::advanceAmTakeoffRampProgress(0.2f, 0.1f, 1.0f,
+			takeoff_status_s::TAKEOFF_STATE_RAMPUP, true), 1.0f);
+}
+
+TEST(AmPosControlTest, GroundedReadyStateRequiresOutputGate)
+{
+	EXPECT_TRUE(AmPosControl::takeoffStateRequiresOutputGate(takeoff_status_s::TAKEOFF_STATE_SPOOLUP, false));
+	EXPECT_TRUE(AmPosControl::takeoffStateRequiresOutputGate(takeoff_status_s::TAKEOFF_STATE_READY_FOR_TAKEOFF, false));
+}
+
+TEST(AmPosControlTest, RampupAndFlightWithoutGroundContactAllowOutput)
+{
+	EXPECT_FALSE(AmPosControl::takeoffStateRequiresOutputGate(takeoff_status_s::TAKEOFF_STATE_RAMPUP, false));
+	EXPECT_FALSE(AmPosControl::takeoffStateRequiresOutputGate(takeoff_status_s::TAKEOFF_STATE_FLIGHT, false));
+}
+
+TEST(AmPosControlTest, FlightWithGroundContactRequiresOutputGate)
+{
+	EXPECT_TRUE(AmPosControl::takeoffStateRequiresOutputGate(takeoff_status_s::TAKEOFF_STATE_FLIGHT, true));
+}
+
+TEST(AmPosControlTest, OffboardSetpointWantsTakeoffForUpwardPositionVelocityOrAcceleration)
+{
+	vehicle_local_position_s position = validLocalPosition();
+	position.timestamp_sample = 1000;
+	position.z = -3.0f;
+
+	trajectory_setpoint_s setpoint{};
+	setpoint.timestamp = 1000;
+	setpoint.position[2] = -4.0f;
+	EXPECT_TRUE(AmPosControl::offboardSetpointWantsTakeoff(setpoint, position, position.timestamp_sample));
+
+	setpoint = {};
+	setpoint.timestamp = 1000;
+	setpoint.velocity[2] = -0.1f;
+	EXPECT_TRUE(AmPosControl::offboardSetpointWantsTakeoff(setpoint, position, position.timestamp_sample));
+
+	setpoint = {};
+	setpoint.timestamp = 1000;
+	setpoint.acceleration[2] = -0.1f;
+	EXPECT_TRUE(AmPosControl::offboardSetpointWantsTakeoff(setpoint, position, position.timestamp_sample));
+}
+
+TEST(AmPosControlTest, OffboardSetpointDoesNotWantTakeoffForStaleOrNonUpwardSetpoint)
+{
+	vehicle_local_position_s position = validLocalPosition();
+	position.timestamp_sample = 3_s;
+	position.z = -3.0f;
+
+	trajectory_setpoint_s setpoint{};
+	setpoint.timestamp = 1000;
+	setpoint.position[2] = -4.0f;
+	EXPECT_FALSE(AmPosControl::offboardSetpointWantsTakeoff(setpoint, position, position.timestamp_sample));
+
+	setpoint = {};
+	setpoint.timestamp = 3_s;
+	setpoint.position[2] = -2.0f;
+	setpoint.velocity[2] = 0.1f;
+	setpoint.acceleration[2] = 0.1f;
+	EXPECT_FALSE(AmPosControl::offboardSetpointWantsTakeoff(setpoint, position, position.timestamp_sample));
+}
+
+TEST(AmPosControlTest, EnteringAmModeInAirSkipsTakeoffRamp)
+{
+	EXPECT_TRUE(AmPosControl::shouldSkipTakeoffRampOnAmModeEntry(true, false, false));
+	EXPECT_FALSE(AmPosControl::shouldSkipTakeoffRampOnAmModeEntry(true, false, true));
+	EXPECT_FALSE(AmPosControl::shouldSkipTakeoffRampOnAmModeEntry(true, true, false));
+	EXPECT_FALSE(AmPosControl::shouldSkipTakeoffRampOnAmModeEntry(false, true, false));
+}

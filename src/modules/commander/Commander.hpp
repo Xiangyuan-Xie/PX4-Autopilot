@@ -39,6 +39,7 @@
 #include "HealthAndArmingChecks/HealthAndArmingChecks.hpp"
 #include "HomePosition.hpp"
 #include "ModeManagement.hpp"
+#include "ModeUtil/control_mode.hpp"
 #include "MulticopterThrowLaunch/MulticopterThrowLaunch.hpp"
 #include "Safety.hpp"
 #include "UserModeIntention.hpp"
@@ -152,6 +153,25 @@ private:
 	transition_result_t arm(arm_disarm_reason_t calling_reason, bool run_preflight_checks = true);
 
 	transition_result_t disarm(arm_disarm_reason_t calling_reason, bool forced = false);
+
+	static bool manualDisarmInAirAllowed(const vehicle_status_s &vehicle_status,
+					     const vehicle_control_mode_s &vehicle_control_mode,
+					     arm_disarm_reason_t calling_reason, bool com_disarm_man)
+	{
+		const bool mc_manual_thrust_mode = vehicle_status.vehicle_type == vehicle_status_s::VEHICLE_TYPE_ROTARY_WING
+						   && vehicle_control_mode.flag_control_manual_enabled
+						   && !vehicle_control_mode.flag_control_climb_rate_enabled;
+		const bool am_position_or_offboard_nav_state = (vehicle_status.nav_state == vehicle_status_s::NAVIGATION_STATE_AM_POSITION)
+								|| (vehicle_status.nav_state == vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD);
+		const bool am_position_control_mode = vehicle_status.vehicle_type == vehicle_status_s::VEHICLE_TYPE_ROTARY_WING
+						      && am_position_or_offboard_nav_state
+						      && mode_util::isAnyAmPositionControlMode(vehicle_control_mode);
+		const bool commanded_by_rc = (calling_reason == arm_disarm_reason_t::stick_gesture)
+					     || (calling_reason == arm_disarm_reason_t::rc_switch)
+					     || (calling_reason == arm_disarm_reason_t::rc_button);
+
+		return commanded_by_rc && com_disarm_man && (mc_manual_thrust_mode || am_position_control_mode);
+	}
 
 	void battery_status_check();
 
