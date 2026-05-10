@@ -416,31 +416,21 @@ void AmPosControl::updateTargets(bool use_default_am_test_setpoint)
 
 	const matrix::Vector3f desired_vel_w = positionNedToEnu(desired_vel_ned);
 	const matrix::Vector3f desired_lin_vel_b = _root_quat_w.inversed().rotateVector(desired_vel_w);
-	const matrix::Quatf heading_quat_w = yawOnlyQuat(_heading_w);
-	const matrix::Vector3f desired_lin_vel_h = heading_quat_w.inversed().rotateVector(desired_vel_w);
 	matrix::Vector3f desired_ang_vel_b{};
 	desired_ang_vel_b.zero();
 
 	if (PX4_ISFINITE(_trajectory_setpoint.yawspeed)) {
-		// `trajectory_setpoint` is expressed in NED, while the policy uses FLU/ENU.
-		desired_ang_vel_b(2) = -_trajectory_setpoint.yawspeed;
+		desired_ang_vel_b = desiredYawRateBodyFromNed(_root_quat_w, _trajectory_setpoint.yawspeed);
 	}
 
 	const float desired_yaw_w = PX4_ISFINITE(_trajectory_setpoint.yaw) ? yawNedToEnu(_trajectory_setpoint.yaw) : _heading_w;
 	const matrix::Quatf desired_quat_w = yawOnlyQuat(desired_yaw_w);
 	const matrix::Vector3f desired_pos_w = positionNedToEnu(desired_pos_ned);
 
-	const bool lin_active[3]{
-		fabsf(desired_lin_vel_h(0)) > kCmdZeroEps,
-		fabsf(desired_lin_vel_h(1)) > kCmdZeroEps,
-		fabsf(desired_lin_vel_h(2)) > kCmdZeroEps,
-	};
-
-	const bool ang_active[3]{
-		false,
-		false,
-		PX4_ISFINITE(_trajectory_setpoint.yawspeed) && fabsf(desired_ang_vel_b(2)) > kCmdZeroEps,
-	};
+	bool lin_active[3]{};
+	activeAxesFromCommand(desired_lin_vel_b, lin_active);
+	bool ang_active[3]{};
+	activeAxesFromCommand(desired_ang_vel_b, ang_active);
 
 	_current_cmd_ref.desired_lin_vel_b = desired_lin_vel_b;
 	_current_cmd_ref.desired_ang_vel_b = desired_ang_vel_b;
@@ -465,8 +455,7 @@ void AmPosControl::buildObservation(RlToolsAdapter::Observation &observation)
 	const matrix::Vector3f &lin_vel_b = _root_lin_vel_b;
 	const matrix::Vector3f &ang_vel_b = _root_ang_vel_b;
 	const matrix::Vector3f gated_pos_err_b = gatePositionErrorForPolicy(
-			_current_cmd_ref.desired_pos_w - root_pos_w, root_quat_w, yawOnlyQuat(_heading_w),
-			_current_cmd_ref.lin_cmd_active);
+			_current_cmd_ref.desired_pos_w - root_pos_w, root_quat_w, _current_cmd_ref.lin_cmd_active);
 
 	const matrix::Quatf att_err_quat = root_quat_w.inversed() * _current_cmd_ref.desired_quat_w;
 	matrix::Eulerf att_err_euler(att_err_quat);

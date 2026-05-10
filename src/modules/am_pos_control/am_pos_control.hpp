@@ -318,19 +318,30 @@ public:
 		return not_taken_off || flying_but_ground_contact;
 	}
 
-	static matrix::Vector3f gatePositionErrorForPolicy(const matrix::Vector3f &pos_error_w,
-			const matrix::Quatf &root_quat_w, const matrix::Quatf &heading_quat_w,
-			const bool active_lin_h[3])
+	static void activeAxesFromCommand(const matrix::Vector3f &command_b, bool active_b[3])
 	{
-		matrix::Vector3f hold_pos_error_h = heading_quat_w.inversed().rotateVector(pos_error_w);
+		for (int i = 0; i < 3; ++i) {
+			active_b[i] = fabsf(command_b(i)) > kCmdZeroEps;
+		}
+	}
+
+	static matrix::Vector3f desiredYawRateBodyFromNed(const matrix::Quatf &root_quat_w, float yawspeed_ned)
+	{
+		return root_quat_w.inversed().rotateVector(matrix::Vector3f{0.0f, 0.0f, -yawspeed_ned});
+	}
+
+	static matrix::Vector3f gatePositionErrorForPolicy(const matrix::Vector3f &pos_error_w,
+			const matrix::Quatf &root_quat_w, const bool active_lin_b[3])
+	{
+		matrix::Vector3f hold_pos_error_b = root_quat_w.inversed().rotateVector(pos_error_w);
 
 		for (int i = 0; i < 3; ++i) {
-			if (active_lin_h[i]) {
-				hold_pos_error_h(i) = 0.0f;
+			if (active_lin_b[i]) {
+				hold_pos_error_b(i) = 0.0f;
 			}
 		}
 
-		return root_quat_w.inversed().rotateVector(heading_quat_w.rotateVector(hold_pos_error_h));
+		return hold_pos_error_b;
 	}
 
 private:

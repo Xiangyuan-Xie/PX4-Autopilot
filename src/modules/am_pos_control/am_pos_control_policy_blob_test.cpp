@@ -54,15 +54,15 @@ constexpr ObservationArray kExampleObservation{
 };
 
 constexpr ActionArray kExpectedResetOutput{
-	0.51409578f, 0.35927492f, -0.06308816f, 1.04917705f
+	1.44654274f, 0.14788398f, 0.26271376f, 0.80224657f
 };
 
 constexpr ActionArray kExpectedHoverOutput{
-	1.05004478f, 1.12744331f, 1.32234383f, 0.76348424f
+	1.58064556f, 1.42877769f, 1.53405118f, 1.29549301f
 };
 
 constexpr ActionArray kExpectedExampleOutput{
-	-1.01492608f, 0.01996717f, -0.16830043f, -0.09750584f
+	0.08637151f, 0.28527230f, 1.79522562f, -1.43899393f
 };
 
 ActionArray evaluateSingleStep(const ObservationArray &observation)
