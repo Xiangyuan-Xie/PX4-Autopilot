@@ -290,33 +290,88 @@ TEST(AmPosControlTest, ApplyMotorReleaseScalesPolicyMotorsAndPreservesNanChannel
 	}
 }
 
-TEST(AmPosControlTest, GatedPositionErrorZeroesOnlyCommandedBodyAxisWhenTilted)
+TEST(AmPosControlTest, GatedPositionErrorKeepsFullBodyErrorWhenLinearCommandInactive)
 {
 	const float pitch = 0.35f;
 	const matrix::Quatf root_quat(matrix::Eulerf(0.f, pitch, 0.f));
 	const matrix::Vector3f pos_error_w = root_quat.rotateVector(matrix::Vector3f{1.f, 2.f, 3.f});
-	const bool active_b[3]{false, false, true};
+	const bool active_b[3]{false, false, false};
 
 	const matrix::Vector3f gated_pos_error_b =
 		AmPosControl::gatePositionErrorForPolicy(pos_error_w, root_quat, active_b);
 
 	EXPECT_NEAR(gated_pos_error_b(0), 1.f, 1e-5f);
 	EXPECT_NEAR(gated_pos_error_b(1), 2.f, 1e-5f);
-	EXPECT_NEAR(gated_pos_error_b(2), 0.f, 1e-5f);
+	EXPECT_NEAR(gated_pos_error_b(2), 3.f, 1e-5f);
 }
 
-TEST(AmPosControlTest, GatedPositionErrorZeroesOnlyCommandedBodyAxis)
+TEST(AmPosControlTest, GatedPositionErrorZeroesOnlyActiveLinearAxes)
 {
-	const matrix::Quatf root_quat(matrix::Eulerf(0.f, 0.f, 0.f));
-	const matrix::Vector3f pos_error_w{1.f, 2.f, 3.f};
-	const bool active_b[3]{true, false, false};
+	const matrix::Quatf root_quat(matrix::Eulerf(0.f, 0.35f, 0.f));
+	const matrix::Vector3f body_error{1.f, 2.f, 3.f};
+	const matrix::Vector3f pos_error_w = root_quat.rotateVector(body_error);
+	const bool active_b[3]{true, false, true};
 
 	const matrix::Vector3f gated_pos_error_b =
 		AmPosControl::gatePositionErrorForPolicy(pos_error_w, root_quat, active_b);
 
 	EXPECT_NEAR(gated_pos_error_b(0), 0.f, 1e-6f);
 	EXPECT_NEAR(gated_pos_error_b(1), 2.f, 1e-6f);
-	EXPECT_NEAR(gated_pos_error_b(2), 3.f, 1e-6f);
+	EXPECT_NEAR(gated_pos_error_b(2), 0.f, 1e-6f);
+}
+
+TEST(AmPosControlTest, GatedPositionErrorPreservesInactiveHorizontalAxesDuringVerticalCommand)
+{
+	const matrix::Quatf root_quat(matrix::Eulerf(0.f, 0.f, 0.f));
+	const matrix::Vector3f pos_error_w{4.f, -5.f, 6.f};
+	const bool active_b[3]{false, false, true};
+
+	const matrix::Vector3f gated_pos_error_b =
+		AmPosControl::gatePositionErrorForPolicy(pos_error_w, root_quat, active_b);
+
+	EXPECT_NEAR(gated_pos_error_b(0), 4.f, 1e-6f);
+	EXPECT_NEAR(gated_pos_error_b(1), -5.f, 1e-6f);
+	EXPECT_NEAR(gated_pos_error_b(2), 0.f, 1e-6f);
+}
+
+TEST(AmPosControlTest, GatedPositionErrorPreservesInactiveAltitudeAxisDuringHorizontalCommand)
+{
+	const matrix::Quatf root_quat(matrix::Eulerf(0.f, 0.f, 0.f));
+	const matrix::Vector3f pos_error_w{4.f, -5.f, 6.f};
+	const bool active_b[3]{true, true, false};
+
+	const matrix::Vector3f gated_pos_error_b =
+		AmPosControl::gatePositionErrorForPolicy(pos_error_w, root_quat, active_b);
+
+	EXPECT_NEAR(gated_pos_error_b(0), 0.f, 1e-6f);
+	EXPECT_NEAR(gated_pos_error_b(1), 0.f, 1e-6f);
+	EXPECT_NEAR(gated_pos_error_b(2), 6.f, 1e-6f);
+}
+
+TEST(AmPosControlTest, GatedAttitudeErrorKeepsFullErrorWhenAngularCommandInactive)
+{
+	const matrix::Vector3f att_error_b{0.1f, -0.2f, 0.3f};
+	const bool active_b[3]{false, false, false};
+
+	const matrix::Vector3f gated_att_error_b =
+		AmPosControl::gateAttitudeErrorForPolicy(att_error_b, active_b);
+
+	EXPECT_NEAR(gated_att_error_b(0), 0.1f, 1e-6f);
+	EXPECT_NEAR(gated_att_error_b(1), -0.2f, 1e-6f);
+	EXPECT_NEAR(gated_att_error_b(2), 0.3f, 1e-6f);
+}
+
+TEST(AmPosControlTest, GatedAttitudeErrorZeroesOnlyActiveAngularAxes)
+{
+	const matrix::Vector3f att_error_b{0.1f, -0.2f, 0.3f};
+	const bool active_b[3]{false, true, false};
+
+	const matrix::Vector3f gated_att_error_b =
+		AmPosControl::gateAttitudeErrorForPolicy(att_error_b, active_b);
+
+	EXPECT_NEAR(gated_att_error_b(0), 0.1f, 1e-6f);
+	EXPECT_NEAR(gated_att_error_b(1), 0.f, 1e-6f);
+	EXPECT_NEAR(gated_att_error_b(2), 0.3f, 1e-6f);
 }
 
 TEST(AmPosControlTest, DesiredYawRateBodyIsPureBodyZWhenLevel)

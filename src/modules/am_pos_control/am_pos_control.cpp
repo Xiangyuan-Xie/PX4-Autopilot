@@ -459,23 +459,15 @@ void AmPosControl::buildObservation(RlToolsAdapter::Observation &observation)
 
 	const matrix::Quatf att_err_quat = root_quat_w.inversed() * _current_cmd_ref.desired_quat_w;
 	matrix::Eulerf att_err_euler(att_err_quat);
-	float roll_err = wrapToPi(att_err_euler.phi());
-	float pitch_err = wrapToPi(att_err_euler.theta());
-	float yaw_err = wrapToPi(att_err_euler.psi());
+	const matrix::Vector3f att_err_b = gateAttitudeErrorForPolicy(
+			matrix::Vector3f{
+				wrapToPi(att_err_euler.phi()),
+				wrapToPi(att_err_euler.theta()),
+				wrapToPi(att_err_euler.psi())
+			},
+			_current_cmd_ref.ang_cmd_active);
 
-	if (_current_cmd_ref.ang_cmd_active[0]) {
-		roll_err = 0.0f;
-	}
-
-	if (_current_cmd_ref.ang_cmd_active[1]) {
-		pitch_err = 0.0f;
-	}
-
-	if (_current_cmd_ref.ang_cmd_active[2]) {
-		yaw_err = 0.0f;
-	}
-
-	const matrix::Dcmf att_err_dcm(matrix::Quatf(matrix::Eulerf(roll_err, pitch_err, yaw_err)));
+	const matrix::Dcmf att_err_dcm(matrix::Quatf(matrix::Eulerf(att_err_b(0), att_err_b(1), att_err_b(2))));
 	const matrix::Vector3f projected_gravity_b = root_quat_w.inversed().rotateVector(kGravityEnu);
 	const matrix::Vector3f lin_vel_err_b = _current_cmd_ref.desired_lin_vel_b - lin_vel_b;
 	const matrix::Vector3f ang_vel_err_b = _current_cmd_ref.desired_ang_vel_b - ang_vel_b;

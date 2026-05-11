@@ -333,15 +333,28 @@ public:
 	static matrix::Vector3f gatePositionErrorForPolicy(const matrix::Vector3f &pos_error_w,
 			const matrix::Quatf &root_quat_w, const bool active_lin_b[3])
 	{
-		matrix::Vector3f hold_pos_error_b = root_quat_w.inversed().rotateVector(pos_error_w);
+		matrix::Vector3f pos_error_b = root_quat_w.inversed().rotateVector(pos_error_w);
 
 		for (int i = 0; i < 3; ++i) {
 			if (active_lin_b[i]) {
-				hold_pos_error_b(i) = 0.0f;
+				pos_error_b(i) = 0.0f;
 			}
 		}
 
-		return hold_pos_error_b;
+		return pos_error_b;
+	}
+
+	static matrix::Vector3f gateAttitudeErrorForPolicy(const matrix::Vector3f &att_error_b, const bool active_ang_b[3])
+	{
+		matrix::Vector3f gated_att_error_b = att_error_b;
+
+		for (int i = 0; i < 3; ++i) {
+			if (active_ang_b[i]) {
+				gated_att_error_b(i) = 0.0f;
+			}
+		}
+
+		return gated_att_error_b;
 	}
 
 private:
