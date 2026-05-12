@@ -295,39 +295,54 @@ TEST(AmPosControlTest, GatedPositionErrorKeepsFullBodyErrorWhenLinearCommandInac
 	const float pitch = 0.35f;
 	const matrix::Quatf root_quat(matrix::Eulerf(0.f, pitch, 0.f));
 	const matrix::Vector3f pos_error_w = root_quat.rotateVector(matrix::Vector3f{1.f, 2.f, 3.f});
-	const bool active_b[3]{false, false, false};
+	const bool active_w[3]{false, false, false};
 
 	const matrix::Vector3f gated_pos_error_b =
-		AmPosControl::gatePositionErrorForPolicy(pos_error_w, root_quat, active_b);
+		AmPosControl::gatePositionErrorForPolicy(pos_error_w, root_quat, active_w);
 
 	EXPECT_NEAR(gated_pos_error_b(0), 1.f, 1e-5f);
 	EXPECT_NEAR(gated_pos_error_b(1), 2.f, 1e-5f);
 	EXPECT_NEAR(gated_pos_error_b(2), 3.f, 1e-5f);
 }
 
-TEST(AmPosControlTest, GatedPositionErrorZeroesOnlyActiveLinearAxes)
+TEST(AmPosControlTest, GatedPositionErrorZeroesWorldAxesBeforeBodyProjection)
 {
-	const matrix::Quatf root_quat(matrix::Eulerf(0.f, 0.35f, 0.f));
-	const matrix::Vector3f body_error{1.f, 2.f, 3.f};
-	const matrix::Vector3f pos_error_w = root_quat.rotateVector(body_error);
-	const bool active_b[3]{true, false, true};
+	const float pitch = 0.35f;
+	const matrix::Quatf root_quat(matrix::Eulerf(0.f, pitch, 0.f));
+	const matrix::Vector3f pos_error_w{4.f, -5.f, 6.f};
+	const bool active_w[3]{false, false, true};
 
 	const matrix::Vector3f gated_pos_error_b =
-		AmPosControl::gatePositionErrorForPolicy(pos_error_w, root_quat, active_b);
+		AmPosControl::gatePositionErrorForPolicy(pos_error_w, root_quat, active_w);
 
-	EXPECT_NEAR(gated_pos_error_b(0), 0.f, 1e-6f);
-	EXPECT_NEAR(gated_pos_error_b(1), 2.f, 1e-6f);
-	EXPECT_NEAR(gated_pos_error_b(2), 0.f, 1e-6f);
+	EXPECT_NEAR(gated_pos_error_b(0), 4.f * cosf(pitch), 1e-6f);
+	EXPECT_NEAR(gated_pos_error_b(1), -5.f, 1e-6f);
+	EXPECT_NEAR(gated_pos_error_b(2), 4.f * sinf(pitch), 1e-6f);
+}
+
+TEST(AmPosControlTest, GatedPositionErrorUsesWorldAxesWhenVehicleYawed)
+{
+	const float yaw = M_PI_F / 4.f;
+	const matrix::Quatf root_quat(matrix::Eulerf(0.f, 0.f, yaw));
+	const matrix::Vector3f pos_error_w{4.f, -5.f, 6.f};
+	const bool active_w[3]{true, false, false};
+
+	const matrix::Vector3f gated_pos_error_b =
+		AmPosControl::gatePositionErrorForPolicy(pos_error_w, root_quat, active_w);
+
+	EXPECT_NEAR(gated_pos_error_b(0), -5.f * sinf(yaw), 1e-6f);
+	EXPECT_NEAR(gated_pos_error_b(1), -5.f * cosf(yaw), 1e-6f);
+	EXPECT_NEAR(gated_pos_error_b(2), 6.f, 1e-6f);
 }
 
 TEST(AmPosControlTest, GatedPositionErrorPreservesInactiveHorizontalAxesDuringVerticalCommand)
 {
 	const matrix::Quatf root_quat(matrix::Eulerf(0.f, 0.f, 0.f));
 	const matrix::Vector3f pos_error_w{4.f, -5.f, 6.f};
-	const bool active_b[3]{false, false, true};
+	const bool active_w[3]{false, false, true};
 
 	const matrix::Vector3f gated_pos_error_b =
-		AmPosControl::gatePositionErrorForPolicy(pos_error_w, root_quat, active_b);
+		AmPosControl::gatePositionErrorForPolicy(pos_error_w, root_quat, active_w);
 
 	EXPECT_NEAR(gated_pos_error_b(0), 4.f, 1e-6f);
 	EXPECT_NEAR(gated_pos_error_b(1), -5.f, 1e-6f);
@@ -338,40 +353,104 @@ TEST(AmPosControlTest, GatedPositionErrorPreservesInactiveAltitudeAxisDuringHori
 {
 	const matrix::Quatf root_quat(matrix::Eulerf(0.f, 0.f, 0.f));
 	const matrix::Vector3f pos_error_w{4.f, -5.f, 6.f};
-	const bool active_b[3]{true, true, false};
+	const bool active_w[3]{true, true, false};
 
 	const matrix::Vector3f gated_pos_error_b =
-		AmPosControl::gatePositionErrorForPolicy(pos_error_w, root_quat, active_b);
+		AmPosControl::gatePositionErrorForPolicy(pos_error_w, root_quat, active_w);
 
 	EXPECT_NEAR(gated_pos_error_b(0), 0.f, 1e-6f);
 	EXPECT_NEAR(gated_pos_error_b(1), 0.f, 1e-6f);
 	EXPECT_NEAR(gated_pos_error_b(2), 6.f, 1e-6f);
 }
 
+TEST(AmPosControlTest, LinearVelocityErrorDampsInactiveWorldAxesWhenVehicleYawed)
+{
+	const float yaw = M_PI_F / 2.f;
+	const matrix::Quatf root_quat(matrix::Eulerf(0.f, 0.f, yaw));
+	const matrix::Vector3f desired_vel_w{0.5f, 0.f, 0.f};
+	const matrix::Vector3f actual_vel_w{0.5f, 3.f, 0.f};
+	const bool active_w[3]{true, false, false};
+	const matrix::Vector3f expected = root_quat.inversed().rotateVector(matrix::Vector3f{0.f, -3.f, 0.f});
+
+	const matrix::Vector3f vel_error_b =
+		AmPosControl::linearVelocityErrorForPolicy(desired_vel_w, actual_vel_w, root_quat, active_w);
+
+	EXPECT_NEAR(vel_error_b(0), expected(0), 1e-6f);
+	EXPECT_NEAR(vel_error_b(1), expected(1), 1e-6f);
+	EXPECT_NEAR(vel_error_b(2), expected(2), 1e-6f);
+}
+
+TEST(AmPosControlTest, LinearVelocityErrorDampsZeroCommandVelocity)
+{
+	const float yaw = M_PI_F / 2.f;
+	const matrix::Quatf root_quat(matrix::Eulerf(0.f, 0.f, yaw));
+	const matrix::Vector3f desired_vel_w{0.f, 0.f, 0.f};
+	const matrix::Vector3f actual_vel_w{0.4f, -0.2f, 0.1f};
+	const bool active_w[3]{false, false, false};
+	const matrix::Vector3f expected = root_quat.inversed().rotateVector(matrix::Vector3f{-0.4f, 0.2f, -0.1f});
+
+	const matrix::Vector3f vel_error_b =
+		AmPosControl::linearVelocityErrorForPolicy(desired_vel_w, actual_vel_w, root_quat, active_w);
+
+	EXPECT_NEAR(vel_error_b(0), expected(0), 1e-6f);
+	EXPECT_NEAR(vel_error_b(1), expected(1), 1e-6f);
+	EXPECT_NEAR(vel_error_b(2), expected(2), 1e-6f);
+}
+
+TEST(AmPosControlTest, AngularVelocityErrorTracksYawAndDampsRollPitchBeforeBodyProjection)
+{
+	const float pitch = 0.35f;
+	const matrix::Quatf root_quat(matrix::Eulerf(0.f, pitch, 0.f));
+	const matrix::Vector3f desired_ang_vel_w{0.f, 0.f, 0.4f};
+	const matrix::Vector3f actual_ang_vel_w{2.f, -1.f, 0.1f};
+	const matrix::Vector3f expected = root_quat.inversed().rotateVector(matrix::Vector3f{-2.f, 1.f, 0.3f});
+
+	const matrix::Vector3f ang_vel_error_b =
+		AmPosControl::angularVelocityErrorForPolicy(desired_ang_vel_w, actual_ang_vel_w, root_quat, true);
+
+	EXPECT_NEAR(ang_vel_error_b(0), expected(0), 1e-6f);
+	EXPECT_NEAR(ang_vel_error_b(1), expected(1), 1e-6f);
+	EXPECT_NEAR(ang_vel_error_b(2), expected(2), 1e-6f);
+}
+
+TEST(AmPosControlTest, AngularVelocityErrorDampsZeroCommandRate)
+{
+	const float pitch = 0.35f;
+	const matrix::Quatf root_quat(matrix::Eulerf(0.f, pitch, 0.f));
+	const matrix::Vector3f desired_ang_vel_w{0.f, 0.f, 0.f};
+	const matrix::Vector3f actual_ang_vel_w{0.2f, -0.3f, 0.4f};
+	const matrix::Vector3f expected = root_quat.inversed().rotateVector(matrix::Vector3f{-0.2f, 0.3f, -0.4f});
+
+	const matrix::Vector3f ang_vel_error_b =
+		AmPosControl::angularVelocityErrorForPolicy(desired_ang_vel_w, actual_ang_vel_w, root_quat, false);
+
+	EXPECT_NEAR(ang_vel_error_b(0), expected(0), 1e-6f);
+	EXPECT_NEAR(ang_vel_error_b(1), expected(1), 1e-6f);
+	EXPECT_NEAR(ang_vel_error_b(2), expected(2), 1e-6f);
+}
+
 TEST(AmPosControlTest, GatedAttitudeErrorKeepsFullErrorWhenAngularCommandInactive)
 {
 	const matrix::Vector3f att_error_b{0.1f, -0.2f, 0.3f};
-	const bool active_b[3]{false, false, false};
 
 	const matrix::Vector3f gated_att_error_b =
-		AmPosControl::gateAttitudeErrorForPolicy(att_error_b, active_b);
+		AmPosControl::gateAttitudeErrorForPolicy(att_error_b, false);
 
 	EXPECT_NEAR(gated_att_error_b(0), 0.1f, 1e-6f);
 	EXPECT_NEAR(gated_att_error_b(1), -0.2f, 1e-6f);
 	EXPECT_NEAR(gated_att_error_b(2), 0.3f, 1e-6f);
 }
 
-TEST(AmPosControlTest, GatedAttitudeErrorZeroesOnlyActiveAngularAxes)
+TEST(AmPosControlTest, GatedAttitudeErrorZeroesOnlyYawWhenYawRateActive)
 {
 	const matrix::Vector3f att_error_b{0.1f, -0.2f, 0.3f};
-	const bool active_b[3]{false, true, false};
 
 	const matrix::Vector3f gated_att_error_b =
-		AmPosControl::gateAttitudeErrorForPolicy(att_error_b, active_b);
+		AmPosControl::gateAttitudeErrorForPolicy(att_error_b, true);
 
 	EXPECT_NEAR(gated_att_error_b(0), 0.1f, 1e-6f);
-	EXPECT_NEAR(gated_att_error_b(1), 0.f, 1e-6f);
-	EXPECT_NEAR(gated_att_error_b(2), 0.3f, 1e-6f);
+	EXPECT_NEAR(gated_att_error_b(1), -0.2f, 1e-6f);
+	EXPECT_NEAR(gated_att_error_b(2), 0.f, 1e-6f);
 }
 
 TEST(AmPosControlTest, DesiredYawRateBodyIsPureBodyZWhenLevel)
@@ -399,18 +478,10 @@ TEST(AmPosControlTest, DesiredYawRateBodyRotatesWorldYawRateIntoTiltedBodyFrame)
 	EXPECT_GT(fabsf(desired_ang_vel_b(0)), 0.1f);
 }
 
-TEST(AmPosControlTest, ActiveAxesFollowFullBodyYawRateCommand)
+TEST(AmPosControlTest, WorldYawRateOnlyActivatesYaw)
 {
-	const matrix::Quatf root_quat(matrix::Eulerf(0.f, 0.35f, 0.f));
-	const matrix::Vector3f desired_ang_vel_b =
-		AmPosControl::desiredYawRateBodyFromNed(root_quat, 0.4f);
-	bool active_b[3]{};
-
-	AmPosControl::activeAxesFromCommand(desired_ang_vel_b, active_b);
-
-	EXPECT_TRUE(active_b[0]);
-	EXPECT_FALSE(active_b[1]);
-	EXPECT_TRUE(active_b[2]);
+	EXPECT_TRUE(AmPosControl::commandActive(0.4f));
+	EXPECT_FALSE(AmPosControl::commandActive(0.0f));
 }
 
 TEST(AmPosControlTest, InverseMappedMotorToActionIsFiniteNearOutputLimits)

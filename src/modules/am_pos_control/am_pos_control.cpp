@@ -37,6 +37,11 @@ matrix::Vector3f positionNedToEnu(const matrix::Vector3f &ned)
 	return {ned(1), ned(0), -ned(2)};
 }
 
+matrix::Vector3f positionEnuToNed(const matrix::Vector3f &enu)
+{
+	return {enu(1), enu(0), -enu(2)};
+}
+
 matrix::Vector3f frdToFlu(const matrix::Vector3f &frd)
 {
 	return {frd(0), -frd(1), -frd(2)};
@@ -402,46 +407,67 @@ void AmPosControl::updateTargets(bool use_default_am_test_setpoint)
 		fillDefaultAmTestSetpoint(_trajectory_setpoint, hrt_absolute_time(), _position, unused_degraded_flags);
 	}
 
-	matrix::Vector3f desired_pos_ned(_position.x, _position.y, _position.z);
-	for (int i = 0; i < 3; ++i) {
-		if (PX4_ISFINITE(_trajectory_setpoint.position[i])) {
-			desired_pos_ned(i) = _trajectory_setpoint.position[i];
-		}
-	}
-
 	matrix::Vector3f desired_vel_ned{};
 	for (int i = 0; i < 3; ++i) {
 		desired_vel_ned(i) = PX4_ISFINITE(_trajectory_setpoint.velocity[i]) ? _trajectory_setpoint.velocity[i] : 0.0f;
 	}
 
 	const matrix::Vector3f desired_vel_w = positionNedToEnu(desired_vel_ned);
-	const matrix::Vector3f desired_lin_vel_b = _root_quat_w.inversed().rotateVector(desired_vel_w);
-	matrix::Vector3f desired_ang_vel_b{};
-	desired_ang_vel_b.zero();
+	matrix::Vector3f desired_ang_vel_w{};
+	desired_ang_vel_w.zero();
 
-	if (PX4_ISFINITE(_trajectory_setpoint.yawspeed)) {
-		desired_ang_vel_b = desiredYawRateBodyFromNed(_root_quat_w, _trajectory_setpoint.yawspeed);
+	if (!_current_cmd_ref.initialized) {
+		_current_cmd_ref.desired_pos_w = _root_pos_w;
+		_current_cmd_ref.desired_quat_w = yawOnlyQuat(_heading_w);
+		_current_cmd_ref.initialized = true;
 	}
 
-	const float desired_yaw_w = PX4_ISFINITE(_trajectory_setpoint.yaw) ? yawNedToEnu(_trajectory_setpoint.yaw) : _heading_w;
+	bool lin_active_w[3]{};
+	activeAxesFromCommand(desired_vel_w, lin_active_w);
+
+	matrix::Vector3f desired_pos_ned = positionEnuToNed(_current_cmd_ref.desired_pos_w);
+	for (int i = 0; i < 3; ++i) {
+		if (PX4_ISFINITE(_trajectory_setpoint.position[i])) {
+			desired_pos_ned(i) = _trajectory_setpoint.position[i];
+		}
+	}
+
+	matrix::Vector3f desired_pos_w = positionNedToEnu(desired_pos_ned);
+	matrix::Vector3f pos_error_w = desired_pos_w - _root_pos_w;
+
+	for (int i = 0; i < 3; ++i) {
+		if (lin_active_w[i]) {
+			pos_error_w(i) = 0.0f;
+		}
+	}
+	desired_pos_w = _root_pos_w + pos_error_w;
+
+	const bool yaw_active = PX4_ISFINITE(_trajectory_setpoint.yawspeed) && commandActive(_trajectory_setpoint.yawspeed);
+	if (PX4_ISFINITE(_trajectory_setpoint.yawspeed)) {
+		desired_ang_vel_w(2) = -_trajectory_setpoint.yawspeed;
+	}
+
+	float desired_yaw_w = matrix::Eulerf(_current_cmd_ref.desired_quat_w).psi();
+
+	if (yaw_active) {
+		desired_yaw_w = _heading_w;
+
+	} else if (PX4_ISFINITE(_trajectory_setpoint.yaw)) {
+		desired_yaw_w = yawNedToEnu(_trajectory_setpoint.yaw);
+	}
+
 	const matrix::Quatf desired_quat_w = yawOnlyQuat(desired_yaw_w);
-	const matrix::Vector3f desired_pos_w = positionNedToEnu(desired_pos_ned);
 
-	bool lin_active[3]{};
-	activeAxesFromCommand(desired_lin_vel_b, lin_active);
-	bool ang_active[3]{};
-	activeAxesFromCommand(desired_ang_vel_b, ang_active);
-
-	_current_cmd_ref.desired_lin_vel_b = desired_lin_vel_b;
-	_current_cmd_ref.desired_ang_vel_b = desired_ang_vel_b;
+	_current_cmd_ref.desired_lin_vel_w = desired_vel_w;
+	_current_cmd_ref.desired_ang_vel_w = desired_ang_vel_w;
 	_current_cmd_ref.desired_pos_w = desired_pos_w;
 	_current_cmd_ref.desired_quat_w = desired_quat_w;
 	for (int i = 0; i < 3; ++i) {
-		_current_cmd_ref.lin_cmd_active[i] = lin_active[i];
-		_current_cmd_ref.ang_cmd_active[i] = ang_active[i];
+		_current_cmd_ref.lin_cmd_active_w[i] = lin_active_w[i];
 	}
-	_current_cmd_ref.has_lin_vel_cmd = anyAxisActive(lin_active);
-	_current_cmd_ref.has_ang_vel_cmd = anyAxisActive(ang_active);
+	_current_cmd_ref.yaw_cmd_active = yaw_active;
+	_current_cmd_ref.has_lin_vel_cmd = anyAxisActive(lin_active_w);
+	_current_cmd_ref.has_ang_vel_cmd = yaw_active;
 }
 
 void AmPosControl::buildObservation(RlToolsAdapter::Observation &observation)
@@ -455,7 +481,8 @@ void AmPosControl::buildObservation(RlToolsAdapter::Observation &observation)
 	const matrix::Vector3f &lin_vel_b = _root_lin_vel_b;
 	const matrix::Vector3f &ang_vel_b = _root_ang_vel_b;
 	const matrix::Vector3f gated_pos_err_b = gatePositionErrorForPolicy(
-			_current_cmd_ref.desired_pos_w - root_pos_w, root_quat_w, _current_cmd_ref.lin_cmd_active);
+			_current_cmd_ref.desired_pos_w - root_pos_w, root_quat_w,
+			_current_cmd_ref.lin_cmd_active_w);
 
 	const matrix::Quatf att_err_quat = root_quat_w.inversed() * _current_cmd_ref.desired_quat_w;
 	matrix::Eulerf att_err_euler(att_err_quat);
@@ -465,12 +492,16 @@ void AmPosControl::buildObservation(RlToolsAdapter::Observation &observation)
 				wrapToPi(att_err_euler.theta()),
 				wrapToPi(att_err_euler.psi())
 			},
-			_current_cmd_ref.ang_cmd_active);
+			_current_cmd_ref.yaw_cmd_active);
 
 	const matrix::Dcmf att_err_dcm(matrix::Quatf(matrix::Eulerf(att_err_b(0), att_err_b(1), att_err_b(2))));
 	const matrix::Vector3f projected_gravity_b = root_quat_w.inversed().rotateVector(kGravityEnu);
-	const matrix::Vector3f lin_vel_err_b = _current_cmd_ref.desired_lin_vel_b - lin_vel_b;
-	const matrix::Vector3f ang_vel_err_b = _current_cmd_ref.desired_ang_vel_b - ang_vel_b;
+	const matrix::Vector3f lin_vel_err_b = linearVelocityErrorForPolicy(
+			_current_cmd_ref.desired_lin_vel_w, root_quat_w.rotateVector(lin_vel_b),
+			root_quat_w, _current_cmd_ref.lin_cmd_active_w);
+	const matrix::Vector3f ang_vel_err_b = angularVelocityErrorForPolicy(
+			_current_cmd_ref.desired_ang_vel_w, root_quat_w.rotateVector(ang_vel_b),
+			root_quat_w, _current_cmd_ref.yaw_cmd_active);
 
 	int idx = 0;
 	observation[idx++] = gated_pos_err_b(0);

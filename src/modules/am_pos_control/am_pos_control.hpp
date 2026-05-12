@@ -318,10 +318,15 @@ public:
 		return not_taken_off || flying_but_ground_contact;
 	}
 
-	static void activeAxesFromCommand(const matrix::Vector3f &command_b, bool active_b[3])
+	static bool commandActive(float command)
+	{
+		return fabsf(command) > kCmdZeroEps;
+	}
+
+	static void activeAxesFromCommand(const matrix::Vector3f &command, bool active[3])
 	{
 		for (int i = 0; i < 3; ++i) {
-			active_b[i] = fabsf(command_b(i)) > kCmdZeroEps;
+			active[i] = commandActive(command(i));
 		}
 	}
 
@@ -331,27 +336,52 @@ public:
 	}
 
 	static matrix::Vector3f gatePositionErrorForPolicy(const matrix::Vector3f &pos_error_w,
-			const matrix::Quatf &root_quat_w, const bool active_lin_b[3])
+			const matrix::Quatf &root_quat_w, const bool active_lin_w[3])
 	{
-		matrix::Vector3f pos_error_b = root_quat_w.inversed().rotateVector(pos_error_w);
+		matrix::Vector3f gated_pos_error_w = pos_error_w;
 
 		for (int i = 0; i < 3; ++i) {
-			if (active_lin_b[i]) {
-				pos_error_b(i) = 0.0f;
+			if (active_lin_w[i]) {
+				gated_pos_error_w(i) = 0.0f;
 			}
 		}
 
-		return pos_error_b;
+		return root_quat_w.inversed().rotateVector(gated_pos_error_w);
 	}
 
-	static matrix::Vector3f gateAttitudeErrorForPolicy(const matrix::Vector3f &att_error_b, const bool active_ang_b[3])
+	static matrix::Vector3f linearVelocityErrorForPolicy(const matrix::Vector3f &desired_vel_w,
+			const matrix::Vector3f &actual_vel_w, const matrix::Quatf &root_quat_w, const bool active_lin_w[3])
 	{
-		matrix::Vector3f gated_att_error_b = att_error_b;
+		matrix::Vector3f gated_desired_vel_w{};
+		gated_desired_vel_w.zero();
 
 		for (int i = 0; i < 3; ++i) {
-			if (active_ang_b[i]) {
-				gated_att_error_b(i) = 0.0f;
+			if (active_lin_w[i]) {
+				gated_desired_vel_w(i) = desired_vel_w(i);
 			}
+		}
+
+		return root_quat_w.inversed().rotateVector(gated_desired_vel_w - actual_vel_w);
+	}
+
+	static matrix::Vector3f angularVelocityErrorForPolicy(const matrix::Vector3f &desired_ang_vel_w,
+			const matrix::Vector3f &actual_ang_vel_w, const matrix::Quatf &root_quat_w, bool yaw_active)
+	{
+		matrix::Vector3f gated_desired_ang_vel_w{};
+		gated_desired_ang_vel_w.zero();
+
+		if (yaw_active) {
+			gated_desired_ang_vel_w(2) = desired_ang_vel_w(2);
+		}
+
+		return root_quat_w.inversed().rotateVector(gated_desired_ang_vel_w - actual_ang_vel_w);
+	}
+
+	static matrix::Vector3f gateAttitudeErrorForPolicy(const matrix::Vector3f &att_error_b, bool yaw_active)
+	{
+		matrix::Vector3f gated_att_error_b = att_error_b;
+		if (yaw_active) {
+			gated_att_error_b(2) = 0.0f;
 		}
 
 		return gated_att_error_b;
@@ -378,14 +408,15 @@ private:
 	};
 
 	struct CommandReference {
-		matrix::Vector3f desired_lin_vel_b{};
-		matrix::Vector3f desired_ang_vel_b{};
+		matrix::Vector3f desired_lin_vel_w{};
+		matrix::Vector3f desired_ang_vel_w{};
 		matrix::Vector3f desired_pos_w{};
 		matrix::Quatf desired_quat_w{};
-		bool lin_cmd_active[3]{false, false, false};
-		bool ang_cmd_active[3]{false, false, false};
+		bool lin_cmd_active_w[3]{false, false, false};
+		bool yaw_cmd_active{false};
 		bool has_lin_vel_cmd{false};
 		bool has_ang_vel_cmd{false};
+		bool initialized{false};
 	};
 
 	void Run() override;
