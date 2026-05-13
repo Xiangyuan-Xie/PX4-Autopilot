@@ -68,7 +68,7 @@ public:
 		result.am_setpoint_timestamp = am_setpoint_timestamp;
 
 		for (int i = 0; i < kActionDim; ++i) {
-			const float mapped = math::constrain(1.0f / (1.0f + expf(-2.0f * action[i])), 0.0f, 1.0f);
+			const float mapped = mapActionToMotor(action[i]);
 			result.am_raw_action[i] = action[i];
 			result.am_mapped_action[i] = mapped;
 			result.am_motor_control[i] = mapped;
@@ -203,14 +203,12 @@ public:
 
 	static float mapActionToMotor(float action)
 	{
-		return math::constrain(1.0f / (1.0f + expf(-2.0f * action)), 0.0f, 1.0f);
+		return math::constrain(action, 0.0f, 1.0f);
 	}
 
 	static float inverseMappedMotorToAction(float motor_control)
 	{
-		constexpr float kMotorEps = 1e-4f;
-		const float motor = math::constrain(motor_control, kMotorEps, 1.0f - kMotorEps);
-		return 0.5f * logf(motor / (1.0f - motor));
+		return math::constrain(motor_control, 0.0f, 1.0f);
 	}
 
 	static float manualTakeoffReleaseFromThrottle(float throttle_zero_centered, float deadzone)
@@ -234,7 +232,8 @@ public:
 		}
 	}
 
-	static void fillActionHistoryFromMotors(RlToolsAdapter::Action &action_history, const actuator_motors_s &actuator_motors)
+	static void fillActionHistoryFromMotors(RlToolsAdapter::Action &action_history,
+						const actuator_motors_s &actuator_motors)
 	{
 		for (int i = 0; i < kActionDim; ++i) {
 			const float control = PX4_ISFINITE(actuator_motors.control[i]) ? actuator_motors.control[i] : 0.0f;
@@ -259,7 +258,7 @@ public:
 			const float control = PX4_ISFINITE(actuator_motors.control[i]) ? actuator_motors.control[i] : collective;
 			const float differential = control - collective;
 			actuator_motors.control[i] = math::constrain(ramped_collective + differential * ramp_progress,
-						       0.0f, 1.0f);
+						     0.0f, 1.0f);
 		}
 
 		for (int i = kActionDim; i < kMotorControlDim; ++i) {
@@ -380,6 +379,7 @@ public:
 	static matrix::Vector3f gateAttitudeErrorForPolicy(const matrix::Vector3f &att_error_b, bool yaw_active)
 	{
 		matrix::Vector3f gated_att_error_b = att_error_b;
+
 		if (yaw_active) {
 			gated_att_error_b(2) = 0.0f;
 		}
@@ -412,7 +412,7 @@ private:
 		matrix::Vector3f desired_ang_vel_w{};
 		matrix::Vector3f desired_pos_w{};
 		matrix::Quatf desired_quat_w{};
-		bool lin_cmd_active_w[3]{false, false, false};
+		bool lin_cmd_active_w[3] {false, false, false};
 		bool yaw_cmd_active{false};
 		bool has_lin_vel_cmd{false};
 		bool has_ang_vel_cmd{false};
@@ -507,7 +507,7 @@ private:
 	matrix::Vector3f _root_lin_vel_b{};
 	matrix::Vector3f _root_ang_vel_b{};
 	float _heading_w{0.0f};
-	float _prev_action[kActionDim]{0.f, 0.f, 0.f, 0.f};
+	float _prev_action[kActionDim] {0.f, 0.f, 0.f, 0.f};
 	float _takeoff_output_ramp_progress{0.0f};
 	float _manual_takeoff_release{0.0f};
 	int _startup_diag_samples_remaining{0};

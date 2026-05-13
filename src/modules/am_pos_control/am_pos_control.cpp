@@ -140,14 +140,15 @@ bool AmPosControl::updateTakeoffGate(ActiveMode mode, bool was_using_am_mode, fl
 	_vehicle_constraints_sub.update(&_vehicle_constraints);
 
 	bool want_takeoff = _vehicle_constraints.want_takeoff;
-	float speed_up = PX4_ISFINITE(_vehicle_constraints.speed_up) ? _vehicle_constraints.speed_up : _param_ampc_z_vel_up.get();
+	float speed_up = PX4_ISFINITE(_vehicle_constraints.speed_up) ? _vehicle_constraints.speed_up :
+			 _param_ampc_z_vel_up.get();
 
 	_manual_takeoff_release = 1.0f;
 
 	if (mode == ActiveMode::Manual) {
 		_sticks.checkAndUpdateStickInputs();
 		_manual_takeoff_release = manualTakeoffReleaseFromThrottle(_sticks.getThrottleZeroCentered(),
-				       _param_ampc_man_dz.get());
+					  _param_ampc_man_dz.get());
 		want_takeoff = _manual_takeoff_release > 0.0f;
 	}
 
@@ -157,7 +158,7 @@ bool AmPosControl::updateTakeoffGate(ActiveMode mode, bool was_using_am_mode, fl
 	}
 
 	const bool skip_takeoff = shouldSkipTakeoffRampOnAmModeEntry(_use_am_mode, was_using_am_mode,
-				   _vehicle_land_detected.landed);
+				  _vehicle_land_detected.landed);
 	_takeoff.updateTakeoffState(_vehicle_control_mode.flag_armed, _vehicle_land_detected.landed,
 				    want_takeoff, speed_up, skip_takeoff, _position.timestamp_sample);
 
@@ -166,7 +167,7 @@ bool AmPosControl::updateTakeoffGate(ActiveMode mode, bool was_using_am_mode, fl
 	}
 
 	_takeoff_output_ramp_progress = advanceAmTakeoffRampProgress(_takeoff_output_ramp_progress, dt_s,
-				       _param_mpc_tko_ramp_t.get(), static_cast<uint8_t>(_takeoff.getTakeoffState()), skip_takeoff);
+					_param_mpc_tko_ramp_t.get(), static_cast<uint8_t>(_takeoff.getTakeoffState()), skip_takeoff);
 
 	publishTakeoffStatus();
 
@@ -363,7 +364,8 @@ void AmPosControl::publishStatus()
 	_status_pub.publish(status);
 }
 
-void AmPosControl::publishAmTestStatus(bool vehicle_state_valid, bool arm_state_valid, bool am_setpoint_valid, bool am_valid,
+void AmPosControl::publishAmTestStatus(bool vehicle_state_valid, bool arm_state_valid, bool am_setpoint_valid,
+				       bool am_valid,
 				       uint32_t failure_flags, uint32_t degraded_flags)
 {
 	am_test_status_s status{};
@@ -408,6 +410,7 @@ void AmPosControl::updateTargets(bool use_default_am_test_setpoint)
 	}
 
 	matrix::Vector3f desired_vel_ned{};
+
 	for (int i = 0; i < 3; ++i) {
 		desired_vel_ned(i) = PX4_ISFINITE(_trajectory_setpoint.velocity[i]) ? _trajectory_setpoint.velocity[i] : 0.0f;
 	}
@@ -422,10 +425,11 @@ void AmPosControl::updateTargets(bool use_default_am_test_setpoint)
 		_current_cmd_ref.initialized = true;
 	}
 
-	bool lin_active_w[3]{};
+	bool lin_active_w[3] {};
 	activeAxesFromCommand(desired_vel_w, lin_active_w);
 
 	matrix::Vector3f desired_pos_ned = positionEnuToNed(_current_cmd_ref.desired_pos_w);
+
 	for (int i = 0; i < 3; ++i) {
 		if (PX4_ISFINITE(_trajectory_setpoint.position[i])) {
 			desired_pos_ned(i) = _trajectory_setpoint.position[i];
@@ -440,9 +444,11 @@ void AmPosControl::updateTargets(bool use_default_am_test_setpoint)
 			pos_error_w(i) = 0.0f;
 		}
 	}
+
 	desired_pos_w = _root_pos_w + pos_error_w;
 
 	const bool yaw_active = PX4_ISFINITE(_trajectory_setpoint.yawspeed) && commandActive(_trajectory_setpoint.yawspeed);
+
 	if (PX4_ISFINITE(_trajectory_setpoint.yawspeed)) {
 		desired_ang_vel_w(2) = -_trajectory_setpoint.yawspeed;
 	}
@@ -462,9 +468,11 @@ void AmPosControl::updateTargets(bool use_default_am_test_setpoint)
 	_current_cmd_ref.desired_ang_vel_w = desired_ang_vel_w;
 	_current_cmd_ref.desired_pos_w = desired_pos_w;
 	_current_cmd_ref.desired_quat_w = desired_quat_w;
+
 	for (int i = 0; i < 3; ++i) {
 		_current_cmd_ref.lin_cmd_active_w[i] = lin_active_w[i];
 	}
+
 	_current_cmd_ref.yaw_cmd_active = yaw_active;
 	_current_cmd_ref.has_lin_vel_cmd = anyAxisActive(lin_active_w);
 	_current_cmd_ref.has_ang_vel_cmd = yaw_active;
@@ -481,18 +489,18 @@ void AmPosControl::buildObservation(RlToolsAdapter::Observation &observation)
 	const matrix::Vector3f &lin_vel_b = _root_lin_vel_b;
 	const matrix::Vector3f &ang_vel_b = _root_ang_vel_b;
 	const matrix::Vector3f gated_pos_err_b = gatePositionErrorForPolicy(
-			_current_cmd_ref.desired_pos_w - root_pos_w, root_quat_w,
-			_current_cmd_ref.lin_cmd_active_w);
+				_current_cmd_ref.desired_pos_w - root_pos_w, root_quat_w,
+				_current_cmd_ref.lin_cmd_active_w);
 
 	const matrix::Quatf att_err_quat = root_quat_w.inversed() * _current_cmd_ref.desired_quat_w;
 	matrix::Eulerf att_err_euler(att_err_quat);
 	const matrix::Vector3f att_err_b = gateAttitudeErrorForPolicy(
-			matrix::Vector3f{
-				wrapToPi(att_err_euler.phi()),
-				wrapToPi(att_err_euler.theta()),
-				wrapToPi(att_err_euler.psi())
-			},
-			_current_cmd_ref.yaw_cmd_active);
+	matrix::Vector3f{
+		wrapToPi(att_err_euler.phi()),
+		wrapToPi(att_err_euler.theta()),
+		wrapToPi(att_err_euler.psi())
+	},
+	_current_cmd_ref.yaw_cmd_active);
 
 	const matrix::Dcmf att_err_dcm(matrix::Quatf(matrix::Eulerf(att_err_b(0), att_err_b(1), att_err_b(2))));
 	const matrix::Vector3f projected_gravity_b = root_quat_w.inversed().rotateVector(kGravityEnu);
@@ -551,7 +559,8 @@ void AmPosControl::resetActionHistory()
 	}
 }
 
-void AmPosControl::maybeLogPolicyDiagnostics(const RlToolsAdapter::Observation &observation, const RlToolsAdapter::Action &action)
+void AmPosControl::maybeLogPolicyDiagnostics(const RlToolsAdapter::Observation &observation,
+		const RlToolsAdapter::Action &action)
 {
 	if (_startup_diag_samples_remaining <= 0) {
 		return;
@@ -561,13 +570,13 @@ void AmPosControl::maybeLogPolicyDiagnostics(const RlToolsAdapter::Observation &
 	const char *mode_label = mode == ActiveMode::Offboard ? "AM Offboard" :
 				 mode == ActiveMode::Test ? "AM Test" : "AM Position";
 
-	float mapped_action[kActionDim]{};
+	float mapped_action[kActionDim] {};
 	float mapped_sum = 0.0f;
 	float mapped_min = INFINITY;
 	float mapped_max = -INFINITY;
 
 	for (int i = 0; i < kActionDim; ++i) {
-		mapped_action[i] = math::constrain(1.0f / (1.0f + expf(-2.0f * action[i])), 0.0f, 1.0f);
+		mapped_action[i] = mapActionToMotor(action[i]);
 		mapped_sum += mapped_action[i];
 		mapped_min = math::min(mapped_min, mapped_action[i]);
 		mapped_max = math::max(mapped_max, mapped_action[i]);
@@ -636,7 +645,8 @@ void AmPosControl::publishAmTestResult(uint32_t failure_flags, uint32_t degraded
 void AmPosControl::publishAmTestResult(const RlToolsAdapter::Action &action, uint32_t degraded_flags)
 {
 	am_test_result_s result{};
-	fillAmTestResultFromAction(result, hrt_absolute_time(), _angular_velocity.timestamp_sample, _trajectory_setpoint.timestamp,
+	fillAmTestResultFromAction(result, hrt_absolute_time(), _angular_velocity.timestamp_sample,
+				   _trajectory_setpoint.timestamp,
 				   action, degraded_flags);
 	_am_test_result_pub.publish(result);
 }
@@ -658,7 +668,8 @@ void AmPosControl::applyAction(const RlToolsAdapter::Observation &observation, c
 		actuator_motors.control[i] = NAN;
 	}
 
-	const bool manual_takeoff_release_active = mode == ActiveMode::Manual && _takeoff.getTakeoffState() < TakeoffState::flight;
+	const bool manual_takeoff_release_active = mode == ActiveMode::Manual
+			&& _takeoff.getTakeoffState() < TakeoffState::flight;
 
 	if (publish_outputs && manual_takeoff_release_active) {
 		applyMotorRelease(actuator_motors, _manual_takeoff_release);
@@ -726,6 +737,7 @@ void AmPosControl::Run()
 
 	vehicle_status_s vehicle_status{};
 	const bool was_using_am_mode = _use_am_mode;
+
 	if (_vehicle_status_sub.updated()) {
 		_vehicle_status_sub.copy(&vehicle_status);
 		_use_am_mode = vehicle_status.nav_state == vehicle_status_s::NAVIGATION_STATE_AM_POSITION
@@ -785,6 +797,7 @@ void AmPosControl::Run()
 
 	uint32_t am_test_degraded_flags = am_test_result_s::DEGRADED_NONE;
 	float dt_s = 0.0f;
+
 	if (!updateVehicleState(dt_s, am_test_mode, am_test_degraded_flags)) {
 		_adapter.reset();
 		resetCommandReference();
@@ -859,6 +872,7 @@ void AmPosControl::Run()
 	buildObservation(observation);
 
 	RlToolsAdapter::Action action{};
+
 	if (_adapter.infer(hrt_absolute_time(), observation, action)) {
 		maybeLogPolicyDiagnostics(observation, action);
 		RlToolsAdapter::Action executed_action{};
