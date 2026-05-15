@@ -137,6 +137,7 @@ public:
 		switch (user_intended_nav_state) {
 		case vehicle_status_s::NAVIGATION_STATE_POSCTL:
 		case vehicle_status_s::NAVIGATION_STATE_AM_POSITION:
+		case vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD:
 			return user_intended_nav_state;
 
 		default:

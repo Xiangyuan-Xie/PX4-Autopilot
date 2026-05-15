@@ -177,6 +177,71 @@ TEST(AmPosControlTest, FillDefaultAmTestSetpointUsesCurrentPoseAndMarksDegraded)
 	EXPECT_EQ(degraded_flags, am_test_result_s::DEGRADED_SETPOINT_DEFAULTED);
 }
 
+TEST(AmPosControlTest, FillAmOffboardHoldSetpointKeepsReferenceAndMarksDegraded)
+{
+	trajectory_setpoint_s setpoint{};
+	uint32_t degraded_flags = 0;
+
+	AmPosControl::fillAmOffboardHoldSetpoint(setpoint, 2000, degraded_flags);
+
+	EXPECT_EQ(setpoint.timestamp, 2000);
+	EXPECT_TRUE(std::isnan(setpoint.position[0]));
+	EXPECT_TRUE(std::isnan(setpoint.position[1]));
+	EXPECT_TRUE(std::isnan(setpoint.position[2]));
+	EXPECT_FLOAT_EQ(setpoint.velocity[0], 0.0f);
+	EXPECT_FLOAT_EQ(setpoint.velocity[1], 0.0f);
+	EXPECT_FLOAT_EQ(setpoint.velocity[2], 0.0f);
+	EXPECT_TRUE(std::isnan(setpoint.yaw));
+	EXPECT_FLOAT_EQ(setpoint.yawspeed, 0.0f);
+	EXPECT_EQ(degraded_flags, am_policy_observation_s::DEGRADED_SETPOINT_DEFAULTED);
+}
+
+TEST(AmPosControlTest, AmOffboardUsesExternalSetpointOnlyWhenModeAndTrajectoryAreValid)
+{
+	offboard_control_mode_s offboard_control_mode{};
+	offboard_control_mode.position = true;
+
+	trajectory_setpoint_s setpoint{};
+	setpoint.timestamp = 1000;
+	setpoint.position[0] = 1.0f;
+	setpoint.position[1] = NAN;
+	setpoint.position[2] = NAN;
+
+	EXPECT_TRUE(AmPosControl::amOffboardExternalSetpointUsable(offboard_control_mode, setpoint, true, true));
+	EXPECT_FALSE(AmPosControl::amOffboardExternalSetpointUsable(offboard_control_mode, setpoint, false, true));
+	EXPECT_FALSE(AmPosControl::amOffboardExternalSetpointUsable(offboard_control_mode, setpoint, true, false));
+
+	offboard_control_mode.position = false;
+	offboard_control_mode.velocity = true;
+	setpoint.position[0] = NAN;
+	setpoint.velocity[0] = NAN;
+	setpoint.velocity[1] = 2.0f;
+	EXPECT_TRUE(AmPosControl::amOffboardExternalSetpointUsable(offboard_control_mode, setpoint, true, true));
+
+	offboard_control_mode.velocity = false;
+	offboard_control_mode.attitude = true;
+	EXPECT_FALSE(AmPosControl::amOffboardExternalSetpointUsable(offboard_control_mode, setpoint, true, true));
+}
+
+TEST(AmPosControlTest, AmOffboardDoesNotTreatYawOnlySetpointAsExternalPositionSetpoint)
+{
+	offboard_control_mode_s offboard_control_mode{};
+	offboard_control_mode.position = true;
+
+	trajectory_setpoint_s setpoint{};
+	setpoint.timestamp = 1000;
+	setpoint.position[0] = NAN;
+	setpoint.position[1] = NAN;
+	setpoint.position[2] = NAN;
+	setpoint.velocity[0] = NAN;
+	setpoint.velocity[1] = NAN;
+	setpoint.velocity[2] = NAN;
+	setpoint.yaw = 1.0f;
+	setpoint.yawspeed = 0.2f;
+
+	EXPECT_FALSE(AmPosControl::amOffboardExternalSetpointUsable(offboard_control_mode, setpoint, true, true));
+}
+
 TEST(AmPosControlTest, FillThrustSetpointFromMotorsAveragesFourMotorCommands)
 {
 	actuator_motors_s actuator_motors{};
@@ -400,13 +465,13 @@ TEST(AmPosControlTest, LinearVelocityErrorDampsZeroCommandVelocity)
 	EXPECT_NEAR(vel_error_b(2), expected(2), 1e-6f);
 }
 
-TEST(AmPosControlTest, AngularVelocityErrorTracksYawAndDampsRollPitchBeforeBodyProjection)
+TEST(AmPosControlTest, AngularVelocityErrorTracksYawWithoutDampingRollPitchBeforeBodyProjection)
 {
 	const float pitch = 0.35f;
 	const matrix::Quatf root_quat(matrix::Eulerf(0.f, pitch, 0.f));
 	const matrix::Vector3f desired_ang_vel_w{0.f, 0.f, 0.4f};
 	const matrix::Vector3f actual_ang_vel_w{2.f, -1.f, 0.1f};
-	const matrix::Vector3f expected = root_quat.inversed().rotateVector(matrix::Vector3f{-2.f, 1.f, 0.3f});
+	const matrix::Vector3f expected = root_quat.inversed().rotateVector(matrix::Vector3f{0.f, 0.f, 0.3f});
 
 	const matrix::Vector3f ang_vel_error_b =
 		AmPosControl::angularVelocityErrorForPolicy(desired_ang_vel_w, actual_ang_vel_w, root_quat, true);
@@ -416,13 +481,13 @@ TEST(AmPosControlTest, AngularVelocityErrorTracksYawAndDampsRollPitchBeforeBodyP
 	EXPECT_NEAR(ang_vel_error_b(2), expected(2), 1e-6f);
 }
 
-TEST(AmPosControlTest, AngularVelocityErrorDampsZeroCommandRate)
+TEST(AmPosControlTest, AngularVelocityErrorPenalizesZeroYawCommandWithoutDampingRollPitch)
 {
 	const float pitch = 0.35f;
 	const matrix::Quatf root_quat(matrix::Eulerf(0.f, pitch, 0.f));
 	const matrix::Vector3f desired_ang_vel_w{0.f, 0.f, 0.f};
 	const matrix::Vector3f actual_ang_vel_w{0.2f, -0.3f, 0.4f};
-	const matrix::Vector3f expected = root_quat.inversed().rotateVector(matrix::Vector3f{-0.2f, 0.3f, -0.4f});
+	const matrix::Vector3f expected = root_quat.inversed().rotateVector(matrix::Vector3f{0.f, 0.f, -0.4f});
 
 	const matrix::Vector3f ang_vel_error_b =
 		AmPosControl::angularVelocityErrorForPolicy(desired_ang_vel_w, actual_ang_vel_w, root_quat, false);
@@ -432,7 +497,7 @@ TEST(AmPosControlTest, AngularVelocityErrorDampsZeroCommandRate)
 	EXPECT_NEAR(ang_vel_error_b(2), expected(2), 1e-6f);
 }
 
-TEST(AmPosControlTest, GatedAttitudeErrorKeepsFullErrorWhenAngularCommandInactive)
+TEST(AmPosControlTest, GatedAttitudeErrorKeepsTiltedYawProjectionWhenYawCommandInactive)
 {
 	const matrix::Vector3f att_error_b{0.1f, -0.2f, 0.3f};
 
@@ -444,7 +509,7 @@ TEST(AmPosControlTest, GatedAttitudeErrorKeepsFullErrorWhenAngularCommandInactiv
 	EXPECT_NEAR(gated_att_error_b(2), 0.3f, 1e-6f);
 }
 
-TEST(AmPosControlTest, GatedAttitudeErrorZeroesOnlyYawWhenYawRateActive)
+TEST(AmPosControlTest, GatedAttitudeErrorReleasesYawOnlyWhenYawRateActive)
 {
 	const matrix::Vector3f att_error_b{0.1f, -0.2f, 0.3f};
 
@@ -454,6 +519,27 @@ TEST(AmPosControlTest, GatedAttitudeErrorZeroesOnlyYawWhenYawRateActive)
 	EXPECT_NEAR(gated_att_error_b(0), 0.1f, 1e-6f);
 	EXPECT_NEAR(gated_att_error_b(1), -0.2f, 1e-6f);
 	EXPECT_NEAR(gated_att_error_b(2), 0.f, 1e-6f);
+}
+
+TEST(AmPosControlTest, GatedAttitudeErrorUsesLevelRollPitchTarget)
+{
+	const matrix::Quatf root_quat(matrix::Eulerf(0.15f, -0.25f, 0.0f));
+	const matrix::Quatf desired_quat(matrix::Eulerf(0.f, 0.f, 0.6f));
+	matrix::Eulerf expected_euler(root_quat.inversed() * desired_quat);
+
+	const matrix::Vector3f gated_att_error_b = AmPosControl::gateAttitudeErrorForPolicy(
+		matrix::Vector3f{
+			matrix::wrap_pi(expected_euler.phi()),
+			matrix::wrap_pi(expected_euler.theta()),
+			matrix::wrap_pi(expected_euler.psi())
+		},
+		false);
+
+	EXPECT_NEAR(gated_att_error_b(0), matrix::wrap_pi(expected_euler.phi()), 1e-6f);
+	EXPECT_NEAR(gated_att_error_b(1), matrix::wrap_pi(expected_euler.theta()), 1e-6f);
+	EXPECT_NEAR(gated_att_error_b(2), matrix::wrap_pi(expected_euler.psi()), 1e-6f);
+	EXPECT_NE(fabsf(gated_att_error_b(0)), 0.f);
+	EXPECT_NE(fabsf(gated_att_error_b(1)), 0.f);
 }
 
 TEST(AmPosControlTest, DesiredYawRateBodyIsPureBodyZWhenLevel)

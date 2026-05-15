@@ -20,7 +20,7 @@ TEST(ModeRequirementsTest, AddsAmPositionRequirementsForDedicatedInternalNavStat
 	EXPECT_NE(flags.mode_req_other & am_position_mask, 0u);
 }
 
-TEST(ModeRequirementsTest, AddsAmOffboardRequirementsForDedicatedInternalNavState)
+TEST(ModeRequirementsTest, AddsOnlyAmPosControlRequirementForDedicatedAmOffboardNavState)
 {
 	failsafe_flags_s flags{};
 
@@ -28,11 +28,15 @@ TEST(ModeRequirementsTest, AddsAmOffboardRequirementsForDedicatedInternalNavStat
 
 	const uint32_t am_offboard_mask = 1u << vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD;
 
-	EXPECT_NE(flags.mode_req_angular_velocity & am_offboard_mask, 0u);
-	EXPECT_NE(flags.mode_req_attitude & am_offboard_mask, 0u);
-	EXPECT_NE(flags.mode_req_local_position & am_offboard_mask, 0u);
-	EXPECT_NE(flags.mode_req_local_alt & am_offboard_mask, 0u);
-	EXPECT_NE(flags.mode_req_offboard_signal & am_offboard_mask, 0u);
+	EXPECT_EQ(flags.mode_req_angular_velocity & am_offboard_mask, 0u);
+	EXPECT_EQ(flags.mode_req_attitude & am_offboard_mask, 0u);
+	EXPECT_EQ(flags.mode_req_local_position & am_offboard_mask, 0u);
+	EXPECT_EQ(flags.mode_req_local_position_relaxed & am_offboard_mask, 0u);
+	EXPECT_EQ(flags.mode_req_global_position & am_offboard_mask, 0u);
+	EXPECT_EQ(flags.mode_req_global_position_relaxed & am_offboard_mask, 0u);
+	EXPECT_EQ(flags.mode_req_local_alt & am_offboard_mask, 0u);
+	EXPECT_EQ(flags.mode_req_offboard_signal & am_offboard_mask, 0u);
+	EXPECT_EQ(flags.mode_req_manual_control & am_offboard_mask, 0u);
 	EXPECT_NE(flags.mode_req_other & am_offboard_mask, 0u);
 }
 

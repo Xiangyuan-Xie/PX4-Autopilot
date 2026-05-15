@@ -65,6 +65,16 @@ TEST(AmPosControlCheckTest, ModuleOfflineBlocksBothModes)
 	EXPECT_FALSE(am_offboard_report.canRun(vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD));
 }
 
+TEST(AmPosControlCheckTest, StaleStatusBlocksAmOffboard)
+{
+	am_pos_control_status_s status = baseStatus();
+	status.timestamp = 1;
+
+	Report reporter = runChecks(status, vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD);
+
+	EXPECT_FALSE(reporter.canRun(vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD));
+}
+
 TEST(AmPosControlCheckTest, ManualReadyAllowsAmPosition)
 {
 	const am_pos_control_status_s status = baseStatus();
@@ -77,45 +87,65 @@ TEST(AmPosControlCheckTest, AmSpecificOffboardReadinessBlocksAmOffboard)
 {
 	am_pos_control_status_s status = baseStatus();
 	status.am_offboard_available = false;
-	status.offboard_control_mode_supported = false;
 
 	Report reporter = runChecks(status, vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD);
 
 	EXPECT_FALSE(reporter.canRun(vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD));
 }
 
-TEST(AmPosControlCheckTest, OffboardSignalLossBlocksAmOffboard)
+TEST(AmPosControlCheckTest, OffboardSignalLossDoesNotBlockAmOffboard)
 {
 	const am_pos_control_status_s status = baseStatus();
 	Report reporter = runChecks(status, vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD, true);
 
-	EXPECT_FALSE(reporter.canRun(vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD));
+	EXPECT_TRUE(reporter.canRun(vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD));
 }
 
-TEST(AmPosControlCheckTest, StaleAmOffboardControlModeBlocksAmOffboard)
+TEST(AmPosControlCheckTest, StaleAmOffboardControlModeDoesNotBlockAmOffboard)
 {
 	am_pos_control_status_s status = baseStatus();
 	status.offboard_control_mode_fresh = false;
 
 	Report reporter = runChecks(status, vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD);
 
-	EXPECT_FALSE(reporter.canRun(vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD));
+	EXPECT_TRUE(reporter.canRun(vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD));
 }
 
-TEST(AmPosControlCheckTest, MissingTrajectorySetpointBlocksAmOffboard)
+TEST(AmPosControlCheckTest, UnsupportedAmOffboardControlModeDoesNotBlockAmOffboard)
+{
+	am_pos_control_status_s status = baseStatus();
+	status.offboard_control_mode_supported = false;
+
+	Report reporter = runChecks(status, vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD);
+
+	EXPECT_TRUE(reporter.canRun(vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD));
+}
+
+TEST(AmPosControlCheckTest, MissingTrajectorySetpointDoesNotBlockAmOffboard)
 {
 	am_pos_control_status_s status = baseStatus();
 	status.trajectory_setpoint_valid = false;
 
 	Report reporter = runChecks(status, vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD);
 
-	EXPECT_FALSE(reporter.canRun(vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD));
+	EXPECT_TRUE(reporter.canRun(vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD));
 }
 
-TEST(AmPosControlCheckTest, YawOnlyTrajectorySetpointBlocksAmOffboard)
+TEST(AmPosControlCheckTest, YawOnlyTrajectorySetpointDoesNotBlockAmOffboard)
 {
 	am_pos_control_status_s status = baseStatus();
 	status.trajectory_setpoint_valid = false;
+
+	Report reporter = runChecks(status, vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD);
+
+	EXPECT_TRUE(reporter.canRun(vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD));
+}
+
+TEST(AmPosControlCheckTest, InvalidArmStateBlocksAmOffboard)
+{
+	am_pos_control_status_s status = baseStatus();
+	status.arm_state_valid = false;
+	status.am_offboard_available = false;
 
 	Report reporter = runChecks(status, vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD);
 

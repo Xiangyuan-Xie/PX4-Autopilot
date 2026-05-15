@@ -52,9 +52,19 @@ TEST(CommanderDisarmTest, DeniesCommandDisarmInAirForAmPositionWithoutForce)
 	EXPECT_FALSE(canDisarmInAir(vehicle_status_s::NAVIGATION_STATE_AM_POSITION, arm_disarm_reason_t::command_external, true));
 }
 
+TEST(CommanderDisarmTest, DeniesCommandDisarmInAirForAmOffboardWithoutForce)
+{
+	EXPECT_FALSE(canDisarmInAir(vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD, arm_disarm_reason_t::command_external, true));
+}
+
 TEST(CommanderDisarmTest, DeniesRcDisarmInAirForAmPositionWhenManualDisarmDisabled)
 {
 	EXPECT_FALSE(canDisarmInAir(vehicle_status_s::NAVIGATION_STATE_AM_POSITION, arm_disarm_reason_t::rc_switch, false));
+}
+
+TEST(CommanderDisarmTest, DeniesRcDisarmInAirForAmOffboardWhenManualDisarmDisabled)
+{
+	EXPECT_FALSE(canDisarmInAir(vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD, arm_disarm_reason_t::rc_button, false));
 }
 
 TEST(CommanderDisarmTest, DeniesRcDisarmInAirForPositionControlWhenManualDisarmEnabled)

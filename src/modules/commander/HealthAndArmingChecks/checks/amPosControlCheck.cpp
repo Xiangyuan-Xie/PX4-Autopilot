@@ -25,9 +25,7 @@ void AmPosControlChecks::checkAndReport(const Context &context, Report &reporter
 	const bool module_running = status_recent && status.module_running;
 
 	const bool am_position_available = module_running && status.am_position_available;
-	const bool am_offboard_available = module_running && status.am_offboard_available && status.arm_state_valid
-					   && status.offboard_control_mode_fresh && status.offboard_control_mode_supported
-					   && status.trajectory_setpoint_valid;
+	const bool am_offboard_available = module_running && status.am_offboard_available && status.arm_state_valid;
 
 	const uint8_t am_position_nav_state = vehicle_status_s::NAVIGATION_STATE_AM_POSITION;
 	const uint8_t am_offboard_nav_state = vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD;

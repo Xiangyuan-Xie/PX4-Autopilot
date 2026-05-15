@@ -118,6 +118,8 @@ static inline bool isAdvanced(uint8_t nav_state)
 
 	case vehicle_status_s::NAVIGATION_STATE_AM_POSITION: return false;
 
+	case vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD: return false;
+
 	case vehicle_status_s::NAVIGATION_STATE_AM_TEST: return false;
 
 	case vehicle_status_s::NAVIGATION_STATE_EXTERNAL1: return false;

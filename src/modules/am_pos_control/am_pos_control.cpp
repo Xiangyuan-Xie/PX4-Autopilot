@@ -117,6 +117,7 @@ void AmPosControl::resetState()
 	_heading_w = 0.0f;
 	_takeoff_output_ramp_progress = 0.0f;
 	_manual_takeoff_release = 0.0f;
+	_am_offboard_using_external_setpoint = false;
 	resetCommandReference();
 	_adapter.reset();
 }
@@ -359,8 +360,7 @@ void AmPosControl::publishStatus()
 	status.offboard_control_mode_fresh = offboardControlModeFresh();
 	status.offboard_control_mode_supported = offboardControlModeSupported();
 	status.am_position_available = status.manual_control_available && status.arm_state_valid;
-	status.am_offboard_available = status.arm_state_valid && status.offboard_control_mode_fresh
-				       && status.offboard_control_mode_supported && offboardTrajectorySetpointValid();
+	status.am_offboard_available = status.arm_state_valid;
 	_status_pub.publish(status);
 }
 
@@ -492,15 +492,17 @@ void AmPosControl::buildObservation(RlToolsAdapter::Observation &observation)
 				_current_cmd_ref.desired_pos_w - root_pos_w, root_quat_w,
 				_current_cmd_ref.lin_cmd_active_w);
 
-	const matrix::Quatf att_err_quat = root_quat_w.inversed() * _current_cmd_ref.desired_quat_w;
+	const float desired_yaw_w = matrix::Eulerf(_current_cmd_ref.desired_quat_w).psi();
+	const matrix::Quatf desired_att_w(matrix::Eulerf(0.f, 0.f, desired_yaw_w));
+	const matrix::Quatf att_err_quat = root_quat_w.inversed() * desired_att_w;
 	matrix::Eulerf att_err_euler(att_err_quat);
 	const matrix::Vector3f att_err_b = gateAttitudeErrorForPolicy(
-	matrix::Vector3f{
-		wrapToPi(att_err_euler.phi()),
-		wrapToPi(att_err_euler.theta()),
-		wrapToPi(att_err_euler.psi())
-	},
-	_current_cmd_ref.yaw_cmd_active);
+		matrix::Vector3f{
+			wrapToPi(att_err_euler.phi()),
+			wrapToPi(att_err_euler.theta()),
+			wrapToPi(att_err_euler.psi())
+		},
+		_current_cmd_ref.yaw_cmd_active);
 
 	const matrix::Dcmf att_err_dcm(matrix::Quatf(matrix::Eulerf(att_err_b(0), att_err_b(1), att_err_b(2))));
 	const matrix::Vector3f projected_gravity_b = root_quat_w.inversed().rotateVector(kGravityEnu);
@@ -760,6 +762,7 @@ void AmPosControl::Run()
 		resetCommandReference();
 		resetActionHistory();
 		_takeoff_output_ramp_progress = 0.0f;
+		_am_offboard_using_external_setpoint = false;
 		_adapter.reset();
 		_startup_diag_samples_remaining = kStartupDiagSamples;
 	}
@@ -770,6 +773,7 @@ void AmPosControl::Run()
 			resetCommandReference();
 			resetActionHistory();
 			_takeoff_output_ramp_progress = 0.0f;
+			_am_offboard_using_external_setpoint = false;
 			_adapter.reset();
 		}
 
@@ -777,25 +781,8 @@ void AmPosControl::Run()
 		return;
 	}
 
-	if (mode == ActiveMode::Offboard) {
-		_offboard_control_mode_sub.update(&_offboard_control_mode);
-
-		if (!offboardControlModeValid()) {
-			_adapter.reset();
-			resetCommandReference();
-
-			if (hrt_elapsed_time(&_last_offboard_diag) > 1_s) {
-				_last_offboard_diag = hrt_absolute_time();
-				PX4_WARN("AM Offboard waiting for supported offboard_control_mode");
-			}
-
-			publishStopSetpoint();
-			perf_end(_loop_perf);
-			return;
-		}
-	}
-
 	uint32_t am_test_degraded_flags = am_test_result_s::DEGRADED_NONE;
+	uint32_t am_policy_degraded_flags = am_policy_observation_s::DEGRADED_NONE;
 	float dt_s = 0.0f;
 
 	if (!updateVehicleState(dt_s, am_test_mode, am_test_degraded_flags)) {
@@ -833,9 +820,25 @@ void AmPosControl::Run()
 	}
 
 	_trajectory_setpoint_sub.update(&_trajectory_setpoint);
+	_offboard_control_mode_sub.update(&_offboard_control_mode);
 
-	const bool trajectory_setpoint_valid = mode == ActiveMode::Offboard ? offboardTrajectorySetpointValid() :
-					       trajectorySetpointValid();
+	bool am_offboard_using_external_setpoint = false;
+
+	if (mode == ActiveMode::Offboard) {
+		am_offboard_using_external_setpoint =
+			amOffboardExternalSetpointUsable(_offboard_control_mode, _trajectory_setpoint, offboardControlModeValid(),
+							 trajectorySetpointFresh());
+
+		if (!am_offboard_using_external_setpoint) {
+			fillAmOffboardHoldSetpoint(_trajectory_setpoint, hrt_absolute_time(), am_policy_degraded_flags);
+
+			if (_am_offboard_using_external_setpoint) {
+				resetCommandReference();
+			}
+		}
+	}
+
+	const bool trajectory_setpoint_valid = mode == ActiveMode::Offboard ? true : trajectorySetpointValid();
 	bool use_default_am_test_setpoint = false;
 
 	if (!trajectory_setpoint_valid) {
@@ -876,13 +879,15 @@ void AmPosControl::Run()
 	if (_adapter.infer(hrt_absolute_time(), observation, action)) {
 		maybeLogPolicyDiagnostics(observation, action);
 		RlToolsAdapter::Action executed_action{};
-		applyAction(observation, action, executed_action, mode, !am_test_mode, am_test_degraded_flags);
+		applyAction(observation, action, executed_action, mode, !am_test_mode,
+			    am_test_mode ? am_test_degraded_flags : am_policy_degraded_flags);
 
 		if (am_test_mode) {
 			publishAmTestStatus(true, true, true, true, am_test_result_s::FAILURE_NONE, am_test_degraded_flags);
 			publishAmTestResult(action, am_test_degraded_flags);
 		}
 
+		_am_offboard_using_external_setpoint = mode == ActiveMode::Offboard && am_offboard_using_external_setpoint;
 		updateActionHistory(executed_action);
 
 	} else {
@@ -897,6 +902,7 @@ void AmPosControl::Run()
 
 		resetCommandReference();
 		resetActionHistory();
+		_am_offboard_using_external_setpoint = false;
 	}
 
 	perf_end(_loop_perf);
@@ -933,6 +939,8 @@ int AmPosControl::print_status()
 	const bool manual_control_available = manualControlAvailable();
 	const bool arm_state_valid = armStateValid();
 	const bool trajectory_setpoint_valid = trajectorySetpointValid();
+	const bool am_position_available = manual_control_available && arm_state_valid;
+	const bool am_offboard_available = arm_state_valid;
 	_offboard_control_mode_sub.update(&_offboard_control_mode);
 
 	const bool manual_control_required = activeMode() != ActiveMode::Offboard;
@@ -943,6 +951,9 @@ int AmPosControl::print_status()
 	PX4_INFO("arm_state_valid: %s, trajectory_setpoint_valid: %s",
 		 arm_state_valid ? "yes" : "no",
 		 trajectory_setpoint_valid ? "yes" : "no");
+	PX4_INFO("am_position_available: %s, am_offboard_available: %s",
+		 am_position_available ? "yes" : "no",
+		 am_offboard_available ? "yes" : "no");
 
 	return 0;
 }

@@ -163,6 +163,44 @@ public:
 		degraded_flags |= am_test_result_s::DEGRADED_SETPOINT_DEFAULTED;
 	}
 
+	static void fillAmOffboardHoldSetpoint(trajectory_setpoint_s &setpoint, hrt_abstime now,
+					       uint32_t &degraded_flags)
+	{
+		setpoint = {};
+		setpoint.timestamp = now;
+
+		for (int i = 0; i < 3; ++i) {
+			setpoint.position[i] = NAN;
+			setpoint.velocity[i] = 0.0f;
+			setpoint.acceleration[i] = NAN;
+			setpoint.jerk[i] = NAN;
+		}
+
+		setpoint.yaw = NAN;
+		setpoint.yawspeed = 0.0f;
+		degraded_flags |= am_policy_observation_s::DEGRADED_SETPOINT_DEFAULTED;
+	}
+
+	static bool amOffboardExternalSetpointUsable(const offboard_control_mode_s &offboard_control_mode,
+			const trajectory_setpoint_s &setpoint, bool offboard_control_mode_valid, bool trajectory_setpoint_fresh)
+	{
+		if (!offboard_control_mode_valid || !trajectory_setpoint_fresh) {
+			return false;
+		}
+
+		if (offboard_control_mode.position) {
+			return PX4_ISFINITE(setpoint.position[0]) || PX4_ISFINITE(setpoint.position[1])
+			       || PX4_ISFINITE(setpoint.position[2]);
+		}
+
+		if (offboard_control_mode.velocity) {
+			return PX4_ISFINITE(setpoint.velocity[0]) || PX4_ISFINITE(setpoint.velocity[1])
+			       || PX4_ISFINITE(setpoint.velocity[2]);
+		}
+
+		return false;
+	}
+
 	static void fillThrustSetpointFromMotors(vehicle_thrust_setpoint_s &thrust_setpoint, hrt_abstime now,
 			hrt_abstime timestamp_sample, const actuator_motors_s &actuator_motors)
 	{
@@ -366,14 +404,11 @@ public:
 	static matrix::Vector3f angularVelocityErrorForPolicy(const matrix::Vector3f &desired_ang_vel_w,
 			const matrix::Vector3f &actual_ang_vel_w, const matrix::Quatf &root_quat_w, bool yaw_active)
 	{
-		matrix::Vector3f gated_desired_ang_vel_w{};
-		gated_desired_ang_vel_w.zero();
+		(void)yaw_active;
+		matrix::Vector3f desired_ang_vel_for_error_w = actual_ang_vel_w;
+		desired_ang_vel_for_error_w(2) = desired_ang_vel_w(2);
 
-		if (yaw_active) {
-			gated_desired_ang_vel_w(2) = desired_ang_vel_w(2);
-		}
-
-		return root_quat_w.inversed().rotateVector(gated_desired_ang_vel_w - actual_ang_vel_w);
+		return root_quat_w.inversed().rotateVector(desired_ang_vel_for_error_w - actual_ang_vel_w);
 	}
 
 	static matrix::Vector3f gateAttitudeErrorForPolicy(const matrix::Vector3f &att_error_b, bool yaw_active)
@@ -484,6 +519,7 @@ private:
 	hrt_abstime _last_offboard_diag{0};
 	hrt_abstime _last_setpoint_diag{0};
 	bool _use_am_mode{false};
+	bool _am_offboard_using_external_setpoint{false};
 	CommandReference _current_cmd_ref{};
 
 	offboard_control_mode_s _offboard_control_mode{};

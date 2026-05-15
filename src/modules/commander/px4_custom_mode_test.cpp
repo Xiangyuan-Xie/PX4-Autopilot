@@ -5,6 +5,7 @@
 #define DEFINE_GET_PX4_CUSTOM_MODE
 #include "px4_custom_mode.h"
 
+#include <lib/modes/ui.hpp>
 #include <uORB/topics/vehicle_status.h>
 
 TEST(Px4CustomModeTest, EncodesAmPositionAsDedicatedPosctlSubmode)
@@ -34,7 +35,7 @@ TEST(Px4CustomModeTest, EncodesAmTestAsDedicatedPosctlSubmode)
 	EXPECT_NE(custom_mode.sub_mode, PX4_CUSTOM_SUB_MODE_POSCTL_AM_POSITION);
 }
 
-TEST(Px4CustomModeTest, KeepsAmPositionAdvertisedWhenAmOffboardIsFiltered)
+TEST(Px4CustomModeTest, MarksAmOffboardNotSelectableWhenItCannotRunYet)
 {
 	const uint32_t am_position_bit = 1u << vehicle_status_s::NAVIGATION_STATE_AM_POSITION;
 	const uint32_t am_offboard_bit = 1u << vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD;
@@ -44,6 +45,20 @@ TEST(Px4CustomModeTest, KeepsAmPositionAdvertisedWhenAmOffboardIsFiltered)
 
 	EXPECT_EQ(filtered_mask & am_position_bit, am_position_bit);
 	EXPECT_EQ(filtered_mask & am_offboard_bit, 0u);
+}
+
+TEST(Px4CustomModeTest, KeepsAmOffboardSelectableWhenItCanRun)
+{
+	const uint32_t am_offboard_bit = 1u << vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD;
+
+	const uint32_t filtered_mask = Commander::filterCanSetNavStatesForAmVisibility(am_offboard_bit, true);
+
+	EXPECT_EQ(filtered_mask & am_offboard_bit, am_offboard_bit);
+}
+
+TEST(Px4CustomModeTest, AmOffboardIsAdvertisedAsRegularMode)
+{
+	EXPECT_FALSE(mode_util::isAdvanced(vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD));
 }
 
 TEST(Px4CustomModeTest, UsesPositionIntentionForArmingChecks)
@@ -62,15 +77,18 @@ TEST(Px4CustomModeTest, UsesAmPositionIntentionForArmingChecks)
 		  vehicle_status_s::NAVIGATION_STATE_AM_POSITION);
 }
 
+TEST(Px4CustomModeTest, UsesAmOffboardIntentionForArmingChecks)
+{
+	EXPECT_EQ(Commander::getNavStateForArmingCheck(
+			  vehicle_status_s::NAVIGATION_STATE_DESCEND,
+			  vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD),
+		  vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD);
+}
+
 TEST(Px4CustomModeTest, KeepsCurrentNavStateForOtherArmingChecks)
 {
 	EXPECT_EQ(Commander::getNavStateForArmingCheck(
 			  vehicle_status_s::NAVIGATION_STATE_ALTCTL,
 			  vehicle_status_s::NAVIGATION_STATE_MANUAL),
-		  vehicle_status_s::NAVIGATION_STATE_ALTCTL);
-
-	EXPECT_EQ(Commander::getNavStateForArmingCheck(
-			  vehicle_status_s::NAVIGATION_STATE_ALTCTL,
-			  vehicle_status_s::NAVIGATION_STATE_AM_OFFBOARD),
 		  vehicle_status_s::NAVIGATION_STATE_ALTCTL);
 }
