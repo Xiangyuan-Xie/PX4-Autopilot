@@ -362,55 +362,79 @@ TEST(AmPosControlTest, GatedPositionErrorKeepsFullBodyErrorWhenLinearCommandInac
 {
 	const float pitch = 0.35f;
 	const matrix::Quatf root_quat(matrix::Eulerf(0.f, pitch, 0.f));
+	const matrix::Quatf heading_quat(matrix::Eulerf(0.f, 0.f, 0.f));
 	const matrix::Vector3f pos_error_w = root_quat.rotateVector(matrix::Vector3f{1.f, 2.f, 3.f});
-	const bool active_w[3] {false, false, false};
+	const bool active_h[3] {false, false, false};
 
 	const matrix::Vector3f gated_pos_error_b =
-		AmPosControl::gatePositionErrorForPolicy(pos_error_w, root_quat, active_w);
+		AmPosControl::gatePositionErrorForPolicy(pos_error_w, root_quat, heading_quat, active_h);
 
 	EXPECT_NEAR(gated_pos_error_b(0), 1.f, 1e-5f);
 	EXPECT_NEAR(gated_pos_error_b(1), 2.f, 1e-5f);
 	EXPECT_NEAR(gated_pos_error_b(2), 3.f, 1e-5f);
 }
 
-TEST(AmPosControlTest, GatedPositionErrorZeroesWorldAxesBeforeBodyProjection)
+TEST(AmPosControlTest, GatedPositionErrorZeroesHeadingAxesBeforeBodyProjection)
 {
 	const float pitch = 0.35f;
 	const matrix::Quatf root_quat(matrix::Eulerf(0.f, pitch, 0.f));
+	const matrix::Quatf heading_quat(matrix::Eulerf(0.f, 0.f, 0.f));
 	const matrix::Vector3f pos_error_w{4.f, -5.f, 6.f};
-	const bool active_w[3] {false, false, true};
+	const bool active_h[3] {false, false, true};
 
 	const matrix::Vector3f gated_pos_error_b =
-		AmPosControl::gatePositionErrorForPolicy(pos_error_w, root_quat, active_w);
+		AmPosControl::gatePositionErrorForPolicy(pos_error_w, root_quat, heading_quat, active_h);
 
 	EXPECT_NEAR(gated_pos_error_b(0), 4.f * cosf(pitch), 1e-6f);
 	EXPECT_NEAR(gated_pos_error_b(1), -5.f, 1e-6f);
 	EXPECT_NEAR(gated_pos_error_b(2), 4.f * sinf(pitch), 1e-6f);
 }
 
-TEST(AmPosControlTest, GatedPositionErrorUsesWorldAxesWhenVehicleYawed)
+TEST(AmPosControlTest, GatedPositionErrorUsesHeadingAxesWhenVehicleYawed)
 {
 	const float yaw = M_PI_F / 4.f;
 	const matrix::Quatf root_quat(matrix::Eulerf(0.f, 0.f, yaw));
+	const matrix::Quatf heading_quat(matrix::Eulerf(0.f, 0.f, yaw));
 	const matrix::Vector3f pos_error_w{4.f, -5.f, 6.f};
-	const bool active_w[3] {true, false, false};
+	const bool active_h[3] {true, false, false};
+	const matrix::Vector3f pos_error_h = heading_quat.inversed().rotateVector(pos_error_w);
+	const matrix::Vector3f expected_error_w = heading_quat.rotateVector(matrix::Vector3f{0.f, pos_error_h(1), pos_error_h(2)});
+	const matrix::Vector3f expected_error_b = root_quat.inversed().rotateVector(expected_error_w);
 
 	const matrix::Vector3f gated_pos_error_b =
-		AmPosControl::gatePositionErrorForPolicy(pos_error_w, root_quat, active_w);
+		AmPosControl::gatePositionErrorForPolicy(pos_error_w, root_quat, heading_quat, active_h);
 
-	EXPECT_NEAR(gated_pos_error_b(0), -5.f * sinf(yaw), 1e-6f);
-	EXPECT_NEAR(gated_pos_error_b(1), -5.f * cosf(yaw), 1e-6f);
-	EXPECT_NEAR(gated_pos_error_b(2), 6.f, 1e-6f);
+	EXPECT_NEAR(gated_pos_error_b(0), expected_error_b(0), 1e-6f);
+	EXPECT_NEAR(gated_pos_error_b(1), expected_error_b(1), 1e-6f);
+	EXPECT_NEAR(gated_pos_error_b(2), expected_error_b(2), 1e-6f);
+	EXPECT_GT(fabsf(gated_pos_error_b(1)), 1.f);
+}
+
+TEST(AmPosControlTest, GatedPositionErrorPreservesCrossTrackDuringForwardHeadingCommand)
+{
+	const float yaw = M_PI_F / 4.f;
+	const matrix::Quatf root_quat(matrix::Eulerf(0.f, 0.f, yaw));
+	const matrix::Quatf heading_quat(matrix::Eulerf(0.f, 0.f, yaw));
+	const matrix::Vector3f pos_error_w = heading_quat.rotateVector(matrix::Vector3f{3.f, -2.f, 1.f});
+	const bool active_h[3] {true, false, false};
+
+	const matrix::Vector3f gated_pos_error_b =
+		AmPosControl::gatePositionErrorForPolicy(pos_error_w, root_quat, heading_quat, active_h);
+
+	EXPECT_NEAR(gated_pos_error_b(0), 0.f, 1e-6f);
+	EXPECT_NEAR(gated_pos_error_b(1), -2.f, 1e-6f);
+	EXPECT_NEAR(gated_pos_error_b(2), 1.f, 1e-6f);
 }
 
 TEST(AmPosControlTest, GatedPositionErrorPreservesInactiveHorizontalAxesDuringVerticalCommand)
 {
 	const matrix::Quatf root_quat(matrix::Eulerf(0.f, 0.f, 0.f));
+	const matrix::Quatf heading_quat(matrix::Eulerf(0.f, 0.f, 0.f));
 	const matrix::Vector3f pos_error_w{4.f, -5.f, 6.f};
-	const bool active_w[3] {false, false, true};
+	const bool active_h[3] {false, false, true};
 
 	const matrix::Vector3f gated_pos_error_b =
-		AmPosControl::gatePositionErrorForPolicy(pos_error_w, root_quat, active_w);
+		AmPosControl::gatePositionErrorForPolicy(pos_error_w, root_quat, heading_quat, active_h);
 
 	EXPECT_NEAR(gated_pos_error_b(0), 4.f, 1e-6f);
 	EXPECT_NEAR(gated_pos_error_b(1), -5.f, 1e-6f);
@@ -420,28 +444,30 @@ TEST(AmPosControlTest, GatedPositionErrorPreservesInactiveHorizontalAxesDuringVe
 TEST(AmPosControlTest, GatedPositionErrorPreservesInactiveAltitudeAxisDuringHorizontalCommand)
 {
 	const matrix::Quatf root_quat(matrix::Eulerf(0.f, 0.f, 0.f));
+	const matrix::Quatf heading_quat(matrix::Eulerf(0.f, 0.f, 0.f));
 	const matrix::Vector3f pos_error_w{4.f, -5.f, 6.f};
-	const bool active_w[3] {true, true, false};
+	const bool active_h[3] {true, true, false};
 
 	const matrix::Vector3f gated_pos_error_b =
-		AmPosControl::gatePositionErrorForPolicy(pos_error_w, root_quat, active_w);
+		AmPosControl::gatePositionErrorForPolicy(pos_error_w, root_quat, heading_quat, active_h);
 
 	EXPECT_NEAR(gated_pos_error_b(0), 0.f, 1e-6f);
 	EXPECT_NEAR(gated_pos_error_b(1), 0.f, 1e-6f);
 	EXPECT_NEAR(gated_pos_error_b(2), 6.f, 1e-6f);
 }
 
-TEST(AmPosControlTest, LinearVelocityErrorDampsInactiveWorldAxesWhenVehicleYawed)
+TEST(AmPosControlTest, LinearVelocityErrorDampsInactiveHeadingAxesWhenVehicleYawed)
 {
 	const float yaw = M_PI_F / 2.f;
 	const matrix::Quatf root_quat(matrix::Eulerf(0.f, 0.f, yaw));
-	const matrix::Vector3f desired_vel_w{0.5f, 0.f, 0.f};
-	const matrix::Vector3f actual_vel_w{0.5f, 3.f, 0.f};
-	const bool active_w[3] {true, false, false};
-	const matrix::Vector3f expected = root_quat.inversed().rotateVector(matrix::Vector3f{0.f, -3.f, 0.f});
+	const matrix::Quatf heading_quat(matrix::Eulerf(0.f, 0.f, yaw));
+	const matrix::Vector3f desired_vel_w = heading_quat.rotateVector(matrix::Vector3f{0.5f, 0.f, 0.f});
+	const matrix::Vector3f actual_vel_w = heading_quat.rotateVector(matrix::Vector3f{0.5f, 3.f, 0.f});
+	const bool active_h[3] {true, false, false};
+	const matrix::Vector3f expected = root_quat.inversed().rotateVector(heading_quat.rotateVector(matrix::Vector3f{0.f, -3.f, 0.f}));
 
 	const matrix::Vector3f vel_error_b =
-		AmPosControl::linearVelocityErrorForPolicy(desired_vel_w, actual_vel_w, root_quat, active_w);
+		AmPosControl::linearVelocityErrorForPolicy(desired_vel_w, actual_vel_w, root_quat, heading_quat, active_h);
 
 	EXPECT_NEAR(vel_error_b(0), expected(0), 1e-6f);
 	EXPECT_NEAR(vel_error_b(1), expected(1), 1e-6f);
@@ -454,11 +480,12 @@ TEST(AmPosControlTest, LinearVelocityErrorDampsZeroCommandVelocity)
 	const matrix::Quatf root_quat(matrix::Eulerf(0.f, 0.f, yaw));
 	const matrix::Vector3f desired_vel_w{0.f, 0.f, 0.f};
 	const matrix::Vector3f actual_vel_w{0.4f, -0.2f, 0.1f};
-	const bool active_w[3] {false, false, false};
+	const matrix::Quatf heading_quat(matrix::Eulerf(0.f, 0.f, 0.f));
+	const bool active_h[3] {false, false, false};
 	const matrix::Vector3f expected = root_quat.inversed().rotateVector(matrix::Vector3f{-0.4f, 0.2f, -0.1f});
 
 	const matrix::Vector3f vel_error_b =
-		AmPosControl::linearVelocityErrorForPolicy(desired_vel_w, actual_vel_w, root_quat, active_w);
+		AmPosControl::linearVelocityErrorForPolicy(desired_vel_w, actual_vel_w, root_quat, heading_quat, active_h);
 
 	EXPECT_NEAR(vel_error_b(0), expected(0), 1e-6f);
 	EXPECT_NEAR(vel_error_b(1), expected(1), 1e-6f);
@@ -528,12 +555,12 @@ TEST(AmPosControlTest, GatedAttitudeErrorUsesLevelRollPitchTarget)
 	matrix::Eulerf expected_euler(root_quat.inversed() * desired_quat);
 
 	const matrix::Vector3f gated_att_error_b = AmPosControl::gateAttitudeErrorForPolicy(
-		matrix::Vector3f{
-			matrix::wrap_pi(expected_euler.phi()),
-			matrix::wrap_pi(expected_euler.theta()),
-			matrix::wrap_pi(expected_euler.psi())
-		},
-		false);
+	matrix::Vector3f{
+		matrix::wrap_pi(expected_euler.phi()),
+		matrix::wrap_pi(expected_euler.theta()),
+		matrix::wrap_pi(expected_euler.psi())
+	},
+	false);
 
 	EXPECT_NEAR(gated_att_error_b(0), matrix::wrap_pi(expected_euler.phi()), 1e-6f);
 	EXPECT_NEAR(gated_att_error_b(1), matrix::wrap_pi(expected_euler.theta()), 1e-6f);

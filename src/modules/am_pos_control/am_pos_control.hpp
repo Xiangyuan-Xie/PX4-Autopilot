@@ -373,31 +373,35 @@ public:
 	}
 
 	static matrix::Vector3f gatePositionErrorForPolicy(const matrix::Vector3f &pos_error_w,
-			const matrix::Quatf &root_quat_w, const bool active_lin_w[3])
+			const matrix::Quatf &root_quat_w, const matrix::Quatf &heading_quat_w, const bool active_lin_h[3])
 	{
-		matrix::Vector3f gated_pos_error_w = pos_error_w;
+		matrix::Vector3f gated_pos_error_h = heading_quat_w.inversed().rotateVector(pos_error_w);
 
 		for (int i = 0; i < 3; ++i) {
-			if (active_lin_w[i]) {
-				gated_pos_error_w(i) = 0.0f;
+			if (active_lin_h[i]) {
+				gated_pos_error_h(i) = 0.0f;
 			}
 		}
 
+		const matrix::Vector3f gated_pos_error_w = heading_quat_w.rotateVector(gated_pos_error_h);
 		return root_quat_w.inversed().rotateVector(gated_pos_error_w);
 	}
 
 	static matrix::Vector3f linearVelocityErrorForPolicy(const matrix::Vector3f &desired_vel_w,
-			const matrix::Vector3f &actual_vel_w, const matrix::Quatf &root_quat_w, const bool active_lin_w[3])
+			const matrix::Vector3f &actual_vel_w, const matrix::Quatf &root_quat_w,
+			const matrix::Quatf &heading_quat_w, const bool active_lin_h[3])
 	{
-		matrix::Vector3f gated_desired_vel_w{};
-		gated_desired_vel_w.zero();
+		const matrix::Vector3f desired_vel_h = heading_quat_w.inversed().rotateVector(desired_vel_w);
+		matrix::Vector3f gated_desired_vel_h{};
+		gated_desired_vel_h.zero();
 
 		for (int i = 0; i < 3; ++i) {
-			if (active_lin_w[i]) {
-				gated_desired_vel_w(i) = desired_vel_w(i);
+			if (active_lin_h[i]) {
+				gated_desired_vel_h(i) = desired_vel_h(i);
 			}
 		}
 
+		const matrix::Vector3f gated_desired_vel_w = heading_quat_w.rotateVector(gated_desired_vel_h);
 		return root_quat_w.inversed().rotateVector(gated_desired_vel_w - actual_vel_w);
 	}
 
@@ -447,7 +451,7 @@ private:
 		matrix::Vector3f desired_ang_vel_w{};
 		matrix::Vector3f desired_pos_w{};
 		matrix::Quatf desired_quat_w{};
-		bool lin_cmd_active_w[3] {false, false, false};
+		bool lin_cmd_active_h[3] {false, false, false};
 		bool yaw_cmd_active{false};
 		bool has_lin_vel_cmd{false};
 		bool has_ang_vel_cmd{false};
