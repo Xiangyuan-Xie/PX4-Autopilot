@@ -495,17 +495,8 @@ void AmPosControl::buildObservation(RlToolsAdapter::Observation &observation)
 
 	const float desired_yaw_w = matrix::Eulerf(_current_cmd_ref.desired_quat_w).psi();
 	const matrix::Quatf desired_att_w(matrix::Eulerf(0.f, 0.f, desired_yaw_w));
-	const matrix::Quatf att_err_quat = root_quat_w.inversed() * desired_att_w;
-	matrix::Eulerf att_err_euler(att_err_quat);
-	const matrix::Vector3f att_err_b = gateAttitudeErrorForPolicy(
-	matrix::Vector3f{
-		wrapToPi(att_err_euler.phi()),
-		wrapToPi(att_err_euler.theta()),
-		wrapToPi(att_err_euler.psi())
-	},
-	_current_cmd_ref.yaw_cmd_active);
-
-	const matrix::Dcmf att_err_dcm(matrix::Quatf(matrix::Eulerf(att_err_b(0), att_err_b(1), att_err_b(2))));
+	const matrix::Dcmf att_err_dcm(attitudeErrorQuatForPolicy(root_quat_w, desired_att_w,
+						_current_cmd_ref.yaw_cmd_active));
 	const matrix::Vector3f projected_gravity_b = root_quat_w.inversed().rotateVector(kGravityEnu);
 	const matrix::Vector3f lin_vel_err_b = linearVelocityErrorForPolicy(
 			_current_cmd_ref.desired_lin_vel_w, root_quat_w.rotateVector(lin_vel_b),

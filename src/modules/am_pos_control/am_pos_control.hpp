@@ -408,22 +408,43 @@ public:
 	static matrix::Vector3f angularVelocityErrorForPolicy(const matrix::Vector3f &desired_ang_vel_w,
 			const matrix::Vector3f &actual_ang_vel_w, const matrix::Quatf &root_quat_w, bool yaw_active)
 	{
-		(void)yaw_active;
-		matrix::Vector3f desired_ang_vel_for_error_w = actual_ang_vel_w;
-		desired_ang_vel_for_error_w(2) = desired_ang_vel_w(2);
+		matrix::Vector3f desired_ang_vel_for_error_w{};
+		desired_ang_vel_for_error_w.zero();
+
+		if (yaw_active) {
+			desired_ang_vel_for_error_w(2) = desired_ang_vel_w(2);
+		}
 
 		return root_quat_w.inversed().rotateVector(desired_ang_vel_for_error_w - actual_ang_vel_w);
 	}
 
-	static matrix::Vector3f gateAttitudeErrorForPolicy(const matrix::Vector3f &att_error_b, bool yaw_active)
+	static matrix::Quatf shortestArcQuat(matrix::Vector3f from_vec, matrix::Vector3f to_vec)
 	{
-		matrix::Vector3f gated_att_error_b = att_error_b;
+		from_vec = from_vec.unit_or_zero();
+		to_vec = to_vec.unit_or_zero();
+		const float dot = math::constrain(from_vec.dot(to_vec), -1.0f, 1.0f);
 
-		if (yaw_active) {
-			gated_att_error_b(2) = 0.0f;
+		if (dot < -1.0f + 1e-6f) {
+			return matrix::Quatf(0.0f, 1.0f, 0.0f, 0.0f);
 		}
 
-		return gated_att_error_b;
+		const matrix::Vector3f cross = from_vec.cross(to_vec);
+		matrix::Quatf quat(1.0f + dot, cross(0), cross(1), cross(2));
+		quat.normalize();
+		return quat;
+	}
+
+	static matrix::Quatf attitudeErrorQuatForPolicy(const matrix::Quatf &root_quat_w,
+			const matrix::Quatf &desired_quat_w, bool yaw_active)
+	{
+		if (!yaw_active) {
+			matrix::Quatf att_error_quat = root_quat_w.inversed() * desired_quat_w;
+			att_error_quat.normalize();
+			return att_error_quat;
+		}
+
+		const matrix::Vector3f projected_gravity_b = root_quat_w.inversed().rotateVector(matrix::Vector3f{0.0f, 0.0f, -1.0f});
+		return shortestArcQuat(matrix::Vector3f{0.0f, 0.0f, -1.0f}, projected_gravity_b);
 	}
 
 private:
