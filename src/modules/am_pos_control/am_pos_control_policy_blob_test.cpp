@@ -31,7 +31,7 @@ using OutputShape = rlt::tensor::Shape<Index, 1, kActionDim>;
 using InputTensor = rlt::Tensor<rlt::tensor::Specification<float, Index, InputShape, false>>;
 using OutputTensor = rlt::Tensor<rlt::tensor::Specification<float, Index, OutputShape, false>>;
 
-static_assert(kObservationDim == 35, "Exported policy observation dim mismatch");
+static_assert(kObservationDim == 30, "Exported policy observation dim mismatch");
 static_assert(kActionDim == 4, "Exported policy action dim mismatch");
 static_assert(RlToolsAdapter::ObservationDim == kObservationDim, "Adapter observation dim mismatch");
 static_assert(RlToolsAdapter::ActionDim == kActionDim, "Adapter action dim mismatch");

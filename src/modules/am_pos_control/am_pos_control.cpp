@@ -247,7 +247,7 @@ bool AmPosControl::armStateValid() const
 	}
 
 	for (int i = 0; i < kArmJointDim; ++i) {
-		if (!PX4_ISFINITE(_arm_joint_state.arm_position[i]) || !PX4_ISFINITE(_arm_joint_state.arm_velocity[i])) {
+		if (!PX4_ISFINITE(_arm_joint_state.arm_position[i])) {
 			return false;
 		}
 	}
@@ -531,10 +531,6 @@ void AmPosControl::buildObservation(RlToolsAdapter::Observation &observation)
 		observation[idx++] = _arm_joint_state.arm_position[i];
 	}
 
-	for (int i = 0; i < kArmJointDim; ++i) {
-		observation[idx++] = _arm_joint_state.arm_velocity[i];
-	}
-
 	for (int i = 0; i < kActionDim; ++i) {
 		observation[idx++] = _prev_action[i];
 	}
@@ -584,7 +580,7 @@ void AmPosControl::maybeLogPolicyDiagnostics(const RlToolsAdapter::Observation &
 		"%s obs pos_err=(%.3f, %.3f, %.3f) grav_z=%.3f prev_action=(%.3f, %.3f, %.3f, %.3f)",
 		mode_label,
 		(double)observation[0], (double)observation[1], (double)observation[2], (double)observation[14],
-		(double)observation[31], (double)observation[32], (double)observation[33], (double)observation[34]);
+		(double)observation[26], (double)observation[27], (double)observation[28], (double)observation[29]);
 	PX4_INFO(
 		"%s act raw=(%.3f, %.3f, %.3f, %.3f) mapped=(%.3f, %.3f, %.3f, %.3f) mean=%.3f spread=%.3f",
 		mode_label,

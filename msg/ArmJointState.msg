@@ -4,4 +4,3 @@
 
 uint64 timestamp
 float32[5] arm_position
-float32[5] arm_velocity
