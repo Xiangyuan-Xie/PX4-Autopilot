@@ -623,6 +623,36 @@ TEST(AmPosControlTest, DesiredYawRateBodyRotatesWorldYawRateIntoTiltedBodyFrame)
 	EXPECT_GT(fabsf(desired_ang_vel_b(0)), 0.1f);
 }
 
+TEST(AmPosControlTest, DesiredYawIgnoresFiniteTrajectoryYawWhenManualYawInactive)
+{
+	EXPECT_FLOAT_EQ(AmPosControl::desiredYawForCommandReference(0.7f, 1.2f, -2.0f, false, false, false),
+			0.7f);
+}
+
+TEST(AmPosControlTest, DesiredYawCapturesHeadingWhileYawRateActive)
+{
+	EXPECT_FLOAT_EQ(AmPosControl::desiredYawForCommandReference(0.7f, 1.2f, -2.0f, true, false, false),
+			1.2f);
+}
+
+TEST(AmPosControlTest, DesiredYawCapturesHeadingOnYawRateRelease)
+{
+	EXPECT_FLOAT_EQ(AmPosControl::desiredYawForCommandReference(0.7f, 1.2f, -2.0f, false, true, false),
+			1.2f);
+}
+
+TEST(AmPosControlTest, DesiredYawRespectsFiniteTrajectoryYawWhenRequested)
+{
+	EXPECT_FLOAT_EQ(AmPosControl::desiredYawForCommandReference(0.7f, 1.2f, -2.0f, false, false, true),
+			-2.0f);
+}
+
+TEST(AmPosControlTest, DesiredYawFallsBackToHeldYawWhenTrajectoryYawInvalid)
+{
+	EXPECT_FLOAT_EQ(AmPosControl::desiredYawForCommandReference(0.7f, 1.2f, NAN, false, false, true),
+			0.7f);
+}
+
 TEST(AmPosControlTest, WorldYawRateOnlyActivatesYaw)
 {
 	EXPECT_TRUE(AmPosControl::commandActive(0.4f));

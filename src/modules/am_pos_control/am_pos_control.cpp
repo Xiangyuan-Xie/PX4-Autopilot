@@ -397,10 +397,15 @@ void AmPosControl::updateConvertedState()
 
 void AmPosControl::updateTargets()
 {
-	updateTargets(false);
+	updateTargets(false, false);
 }
 
 void AmPosControl::updateTargets(bool use_default_am_test_setpoint)
+{
+	updateTargets(use_default_am_test_setpoint, false);
+}
+
+void AmPosControl::updateTargets(bool use_default_am_test_setpoint, bool respect_trajectory_yaw)
 {
 	_trajectory_setpoint_sub.update(&_trajectory_setpoint);
 
@@ -431,14 +436,10 @@ void AmPosControl::updateTargets(bool use_default_am_test_setpoint)
 		desired_ang_vel_w(2) = -_trajectory_setpoint.yawspeed;
 	}
 
-	float desired_yaw_w = matrix::Eulerf(_current_cmd_ref.desired_quat_w).psi();
-
-	if (yaw_active) {
-		desired_yaw_w = _heading_w;
-
-	} else if (PX4_ISFINITE(_trajectory_setpoint.yaw)) {
-		desired_yaw_w = yawNedToEnu(_trajectory_setpoint.yaw);
-	}
+	const float previous_desired_yaw_w = matrix::Eulerf(_current_cmd_ref.desired_quat_w).psi();
+	const float trajectory_yaw_w = PX4_ISFINITE(_trajectory_setpoint.yaw) ? yawNedToEnu(_trajectory_setpoint.yaw) : NAN;
+	const float desired_yaw_w = desiredYawForCommandReference(previous_desired_yaw_w, _heading_w, trajectory_yaw_w,
+				    yaw_active, _current_cmd_ref.yaw_cmd_active, respect_trajectory_yaw);
 
 	const matrix::Quatf desired_quat_w = yawOnlyQuat(desired_yaw_w);
 	const matrix::Vector3f desired_vel_h = desired_quat_w.inversed().rotateVector(desired_vel_w);
@@ -861,7 +862,7 @@ void AmPosControl::Run()
 		return;
 	}
 
-	updateTargets(use_default_am_test_setpoint);
+	updateTargets(use_default_am_test_setpoint, mode != ActiveMode::Manual);
 
 	RlToolsAdapter::Observation observation{};
 	buildObservation(observation);

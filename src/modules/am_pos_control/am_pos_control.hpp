@@ -372,6 +372,20 @@ public:
 		return root_quat_w.inversed().rotateVector(matrix::Vector3f{0.0f, 0.0f, -yawspeed_ned});
 	}
 
+	static float desiredYawForCommandReference(float previous_desired_yaw_w, float current_heading_w,
+			float trajectory_yaw_w, bool yaw_active, bool was_yaw_active, bool respect_trajectory_yaw)
+	{
+		if (yaw_active || was_yaw_active) {
+			return current_heading_w;
+		}
+
+		if (respect_trajectory_yaw && PX4_ISFINITE(trajectory_yaw_w)) {
+			return trajectory_yaw_w;
+		}
+
+		return previous_desired_yaw_w;
+	}
+
 	static matrix::Vector3f gatePositionErrorForPolicy(const matrix::Vector3f &pos_error_w,
 			const matrix::Quatf &root_quat_w, const matrix::Quatf &heading_quat_w, const bool active_lin_h[3])
 	{
@@ -482,6 +496,7 @@ private:
 	void Run() override;
 	void updateTargets();
 	void updateTargets(bool use_default_am_test_setpoint);
+	void updateTargets(bool use_default_am_test_setpoint, bool respect_trajectory_yaw);
 	void buildObservation(RlToolsAdapter::Observation &observation);
 	void applyAction(const RlToolsAdapter::Observation &observation, const RlToolsAdapter::Action &action,
 			 RlToolsAdapter::Action &executed_action, ActiveMode mode, bool publish_outputs,
