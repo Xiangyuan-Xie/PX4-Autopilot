@@ -360,6 +360,62 @@ public:
 		return fabsf(command) > kCmdZeroEps;
 	}
 
+	enum class ActiveMode : uint8_t {
+		None = 0,
+		Manual,
+		Offboard,
+		Test
+	};
+
+	static bool manualYawRateActive(float yawspeed, bool was_yaw_active, hrt_abstime &release_start,
+					hrt_abstime now)
+	{
+		const float abs_yawspeed = fabsf(yawspeed);
+
+		if (abs_yawspeed >= kManualYawActivateThreshold) {
+			release_start = 0;
+			return true;
+		}
+
+		if (!was_yaw_active) {
+			release_start = 0;
+			return false;
+		}
+
+		if (abs_yawspeed > kManualYawReleaseThreshold) {
+			release_start = 0;
+			return true;
+		}
+
+		if (release_start == 0) {
+			release_start = now;
+			return true;
+		}
+
+		if (now < release_start + kManualYawReleaseDelay) {
+			return true;
+		}
+
+		release_start = 0;
+		return false;
+	}
+
+	static bool yawRateActiveForMode(float yawspeed, bool was_yaw_active, ActiveMode mode,
+					 hrt_abstime &manual_yaw_release_start, hrt_abstime now)
+	{
+		if (!PX4_ISFINITE(yawspeed)) {
+			manual_yaw_release_start = 0;
+			return false;
+		}
+
+		if (mode == ActiveMode::Manual) {
+			return manualYawRateActive(yawspeed, was_yaw_active, manual_yaw_release_start, now);
+		}
+
+		manual_yaw_release_start = 0;
+		return commandActive(yawspeed);
+	}
+
 	static void activeAxesFromCommand(const matrix::Vector3f &command, bool active[3])
 	{
 		for (int i = 0; i < 3; ++i) {
@@ -466,6 +522,9 @@ private:
 	static constexpr int kArmJointDim = 5;
 	static constexpr int kMotorControlDim = 12;
 	static constexpr float kCmdZeroEps = 1e-6f;
+	static constexpr float kManualYawActivateThreshold = 0.05f;
+	static constexpr float kManualYawReleaseThreshold = 0.025f;
+	static constexpr hrt_abstime kManualYawReleaseDelay = 150_ms;
 	static constexpr int kStartupDiagSamples = 8;
 	static constexpr float kDiagLowMeanCommand = 0.75f;
 	static constexpr float kDiagLowMinCommand = 0.45f;
@@ -473,13 +532,6 @@ private:
 	static constexpr hrt_abstime kStateTimeout = 1_s;
 	static constexpr hrt_abstime kArmStateTimeout = 200_ms;
 	static constexpr hrt_abstime kTrajectorySetpointTimeout = 200_ms;
-
-	enum class ActiveMode : uint8_t {
-		None = 0,
-		Manual,
-		Offboard,
-		Test
-	};
 
 	struct CommandReference {
 		matrix::Vector3f desired_lin_vel_w{};
@@ -586,6 +638,7 @@ private:
 	float _prev_action[kActionDim] {0.f, 0.f, 0.f, 0.f};
 	float _takeoff_output_ramp_progress{0.0f};
 	float _manual_takeoff_release{0.0f};
+	hrt_abstime _manual_yaw_release_start{0};
 	int _startup_diag_samples_remaining{0};
 
 	RlToolsAdapter _adapter{};

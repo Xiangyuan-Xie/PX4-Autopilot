@@ -524,6 +524,21 @@ TEST(AmPosControlTest, AngularVelocityErrorDampsAllAxesWhenYawCommandInactive)
 	EXPECT_NEAR(ang_vel_error_b(2), expected(2), 1e-6f);
 }
 
+TEST(AmPosControlTest, AngularVelocityErrorIgnoresDesiredYawRateWhenYawInactive)
+{
+	const matrix::Quatf root_quat(matrix::Eulerf(0.f, 0.f, 0.f));
+	const matrix::Vector3f desired_ang_vel_w{0.f, 0.f, 0.3f};
+	const matrix::Vector3f actual_ang_vel_w{0.f, 0.f, 0.1f};
+	const matrix::Vector3f expected{0.f, 0.f, -0.1f};
+
+	const matrix::Vector3f ang_vel_error_b =
+		AmPosControl::angularVelocityErrorForPolicy(desired_ang_vel_w, actual_ang_vel_w, root_quat, false);
+
+	EXPECT_NEAR(ang_vel_error_b(0), expected(0), 1e-6f);
+	EXPECT_NEAR(ang_vel_error_b(1), expected(1), 1e-6f);
+	EXPECT_NEAR(ang_vel_error_b(2), expected(2), 1e-6f);
+}
+
 TEST(AmPosControlTest, AngularVelocityErrorKeepsRollPitchDampingDuringYawRateCommand)
 {
 	const matrix::Quatf root_quat(matrix::Eulerf(0.f, 0.f, 0.f));
@@ -639,6 +654,38 @@ TEST(AmPosControlTest, DesiredYawCapturesHeadingOnYawRateRelease)
 {
 	EXPECT_FLOAT_EQ(AmPosControl::desiredYawForCommandReference(0.7f, 1.2f, -2.0f, false, true, false),
 			1.2f);
+}
+
+TEST(AmPosControlTest, ManualYawRateActiveUsesDeadbandAndReleaseDelay)
+{
+	hrt_abstime release_start = 0;
+
+	EXPECT_FALSE(AmPosControl::manualYawRateActive(0.03f, false, release_start, 1_s));
+	EXPECT_EQ(release_start, 0u);
+
+	EXPECT_TRUE(AmPosControl::manualYawRateActive(0.05f, false, release_start, 1_s));
+	EXPECT_EQ(release_start, 0u);
+
+	EXPECT_TRUE(AmPosControl::manualYawRateActive(0.03f, true, release_start, 1100_ms));
+	EXPECT_EQ(release_start, 0u);
+
+	EXPECT_TRUE(AmPosControl::manualYawRateActive(0.02f, true, release_start, 1200_ms));
+	EXPECT_EQ(release_start, 1200_ms);
+	EXPECT_TRUE(AmPosControl::manualYawRateActive(0.02f, true, release_start, 1300_ms));
+	EXPECT_FALSE(AmPosControl::manualYawRateActive(0.02f, true, release_start, 1350_ms));
+	EXPECT_EQ(release_start, 0u);
+}
+
+TEST(AmPosControlTest, OffboardYawRateActiveKeepsCommandZeroEpsSemantics)
+{
+	hrt_abstime release_start = 0;
+
+	EXPECT_TRUE(AmPosControl::yawRateActiveForMode(0.03f, false, AmPosControl::ActiveMode::Offboard,
+			release_start, 1_s));
+	EXPECT_TRUE(AmPosControl::yawRateActiveForMode(0.03f, false, AmPosControl::ActiveMode::Test,
+			release_start, 1_s));
+	EXPECT_FALSE(AmPosControl::yawRateActiveForMode(0.03f, false, AmPosControl::ActiveMode::Manual,
+			release_start, 1_s));
 }
 
 TEST(AmPosControlTest, DesiredYawRespectsFiniteTrajectoryYawWhenRequested)

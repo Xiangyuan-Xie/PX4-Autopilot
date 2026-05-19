@@ -90,6 +90,7 @@ bool AmPosControl::init()
 void AmPosControl::resetCommandReference()
 {
 	_current_cmd_ref = {};
+	_manual_yaw_release_start = 0;
 }
 
 void AmPosControl::resetState()
@@ -117,6 +118,7 @@ void AmPosControl::resetState()
 	_heading_w = 0.0f;
 	_takeoff_output_ramp_progress = 0.0f;
 	_manual_takeoff_release = 0.0f;
+	_manual_yaw_release_start = 0;
 	_am_offboard_using_external_setpoint = false;
 	resetCommandReference();
 	_adapter.reset();
@@ -408,6 +410,7 @@ void AmPosControl::updateTargets(bool use_default_am_test_setpoint)
 void AmPosControl::updateTargets(bool use_default_am_test_setpoint, bool respect_trajectory_yaw)
 {
 	_trajectory_setpoint_sub.update(&_trajectory_setpoint);
+	const ActiveMode mode = activeMode();
 
 	if (use_default_am_test_setpoint) {
 		uint32_t unused_degraded_flags = am_test_result_s::DEGRADED_NONE;
@@ -430,9 +433,10 @@ void AmPosControl::updateTargets(bool use_default_am_test_setpoint, bool respect
 		_current_cmd_ref.initialized = true;
 	}
 
-	const bool yaw_active = PX4_ISFINITE(_trajectory_setpoint.yawspeed) && commandActive(_trajectory_setpoint.yawspeed);
+	const bool yaw_active = yawRateActiveForMode(_trajectory_setpoint.yawspeed, _current_cmd_ref.yaw_cmd_active,
+				mode, _manual_yaw_release_start, hrt_absolute_time());
 
-	if (PX4_ISFINITE(_trajectory_setpoint.yawspeed)) {
+	if (yaw_active && PX4_ISFINITE(_trajectory_setpoint.yawspeed)) {
 		desired_ang_vel_w(2) = -_trajectory_setpoint.yawspeed;
 	}
 
