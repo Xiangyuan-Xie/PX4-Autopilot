@@ -82,6 +82,98 @@ TEST(AmPosControlTest, FillInvalidAmTestResultUsesNanControlsAndFailureFlag)
 	}
 }
 
+TEST(AmPosControlTest, FillPolicyObservationIncludesSourceTiming)
+{
+	RlToolsAdapter::Observation observation{};
+
+	for (int i = 0; i < RlToolsAdapter::ObservationDim; ++i) {
+		observation[i] = static_cast<float>(i) * 0.5f;
+	}
+
+	const RlToolsAdapter::Action action{0.1f, 0.2f, 0.3f, 0.4f};
+
+	actuator_motors_s actuator_motors{};
+	actuator_motors.timestamp = 9000;
+	actuator_motors.control[0] = 0.11f;
+	actuator_motors.control[1] = 0.22f;
+	actuator_motors.control[2] = 0.33f;
+	actuator_motors.control[3] = 0.44f;
+
+	for (int i = 4; i < 12; ++i) {
+		actuator_motors.control[i] = NAN;
+	}
+
+	AmPosControl::PolicyObservationTiming timing{};
+	timing.observation_build_timestamp = 8000;
+	timing.vehicle_local_position_timestamp = 7010;
+	timing.vehicle_local_position_timestamp_sample = 7000;
+	timing.vehicle_attitude_timestamp = 7110;
+	timing.vehicle_attitude_timestamp_sample = 7100;
+	timing.vehicle_angular_velocity_timestamp = 7210;
+	timing.vehicle_angular_velocity_timestamp_sample = 7200;
+	timing.arm_joint_state_timestamp = 7310;
+	timing.arm_joint_state_timestamp_sample = 7300;
+	timing.trajectory_setpoint_timestamp = 7400;
+	timing.offboard_control_mode_timestamp = 7500;
+	timing.policy_inference_start_timestamp = 8100;
+	timing.policy_inference_finish_timestamp = 8125;
+	timing.policy_sequence = 42;
+
+	am_policy_observation_s policy_observation{};
+	AmPosControl::fillPolicyObservation(policy_observation, observation, action, actuator_motors,
+					    am_policy_observation_s::DEGRADED_SETPOINT_DEFAULTED, timing);
+
+	EXPECT_EQ(policy_observation.timestamp, actuator_motors.timestamp);
+	EXPECT_EQ(policy_observation.timestamp_sample, timing.vehicle_angular_velocity_timestamp_sample);
+	EXPECT_EQ(policy_observation.failure_flags, 0u);
+	EXPECT_EQ(policy_observation.degraded_flags, am_policy_observation_s::DEGRADED_SETPOINT_DEFAULTED);
+	EXPECT_EQ(policy_observation.am_setpoint_timestamp, timing.trajectory_setpoint_timestamp);
+	EXPECT_EQ(policy_observation.observation_build_timestamp, timing.observation_build_timestamp);
+	EXPECT_EQ(policy_observation.vehicle_local_position_timestamp, timing.vehicle_local_position_timestamp);
+	EXPECT_EQ(policy_observation.vehicle_local_position_timestamp_sample, timing.vehicle_local_position_timestamp_sample);
+	EXPECT_EQ(policy_observation.vehicle_attitude_timestamp, timing.vehicle_attitude_timestamp);
+	EXPECT_EQ(policy_observation.vehicle_attitude_timestamp_sample, timing.vehicle_attitude_timestamp_sample);
+	EXPECT_EQ(policy_observation.vehicle_angular_velocity_timestamp, timing.vehicle_angular_velocity_timestamp);
+	EXPECT_EQ(policy_observation.vehicle_angular_velocity_timestamp_sample, timing.vehicle_angular_velocity_timestamp_sample);
+	EXPECT_EQ(policy_observation.arm_joint_state_timestamp, timing.arm_joint_state_timestamp);
+	EXPECT_EQ(policy_observation.arm_joint_state_timestamp_sample, timing.arm_joint_state_timestamp_sample);
+	EXPECT_EQ(policy_observation.trajectory_setpoint_timestamp, timing.trajectory_setpoint_timestamp);
+	EXPECT_EQ(policy_observation.offboard_control_mode_timestamp, timing.offboard_control_mode_timestamp);
+	EXPECT_EQ(policy_observation.policy_inference_start_timestamp, timing.policy_inference_start_timestamp);
+	EXPECT_EQ(policy_observation.policy_inference_finish_timestamp, timing.policy_inference_finish_timestamp);
+	EXPECT_EQ(policy_observation.policy_sequence, timing.policy_sequence);
+
+	for (int i = 0; i < RlToolsAdapter::ObservationDim; ++i) {
+		EXPECT_FLOAT_EQ(policy_observation.observation[i], observation[i]);
+	}
+
+	for (int i = 0; i < 4; ++i) {
+		EXPECT_FLOAT_EQ(policy_observation.raw_action[i], action[i]);
+		EXPECT_FLOAT_EQ(policy_observation.mapped_action[i], actuator_motors.control[i]);
+	}
+
+	for (int i = 0; i < 12; ++i) {
+		if (i < 4) {
+			EXPECT_FLOAT_EQ(policy_observation.motor_control[i], actuator_motors.control[i]);
+
+		} else {
+			EXPECT_TRUE(std::isnan(policy_observation.motor_control[i]));
+		}
+	}
+}
+
+TEST(AmPosControlTest, ArmJointStateCarriesSampleTimestampAndSequence)
+{
+	arm_joint_state_s arm_joint_state{};
+	arm_joint_state.timestamp = 2000;
+	arm_joint_state.timestamp_sample = 1900;
+	arm_joint_state.sequence = 7;
+
+	EXPECT_EQ(arm_joint_state.timestamp, 2000u);
+	EXPECT_EQ(arm_joint_state.timestamp_sample, 1900u);
+	EXPECT_EQ(arm_joint_state.sequence, 7u);
+}
+
 TEST(AmPosControlTest, AmTestLocalPositionAllowsInvalidFiniteXyForDegradedLogging)
 {
 	vehicle_local_position_s position{};

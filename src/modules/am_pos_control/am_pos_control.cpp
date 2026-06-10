@@ -120,6 +120,7 @@ void AmPosControl::resetState()
 	_manual_takeoff_release = 0.0f;
 	_manual_yaw_release_start = 0;
 	_am_offboard_using_external_setpoint = false;
+	_policy_sequence = 0;
 	resetCommandReference();
 	_adapter.reset();
 }
@@ -595,28 +596,11 @@ void AmPosControl::maybeLogPolicyDiagnostics(const RlToolsAdapter::Observation &
 }
 
 void AmPosControl::publishPolicyObservation(const RlToolsAdapter::Observation &observation,
-		const RlToolsAdapter::Action &action, const actuator_motors_s &actuator_motors, uint32_t degraded_flags)
+		const RlToolsAdapter::Action &action, const actuator_motors_s &actuator_motors, uint32_t degraded_flags,
+		const PolicyObservationTiming &timing)
 {
 	am_policy_observation_s policy_observation{};
-	policy_observation.timestamp = actuator_motors.timestamp;
-	policy_observation.timestamp_sample = _angular_velocity.timestamp_sample;
-	policy_observation.failure_flags = 0;
-	policy_observation.degraded_flags = degraded_flags;
-	policy_observation.am_setpoint_timestamp = _trajectory_setpoint.timestamp;
-
-	for (int i = 0; i < RlToolsAdapter::ObservationDim; ++i) {
-		policy_observation.observation[i] = observation[i];
-	}
-
-	for (int i = 0; i < kActionDim; ++i) {
-		policy_observation.raw_action[i] = action[i];
-		policy_observation.mapped_action[i] = actuator_motors.control[i];
-	}
-
-	for (int i = 0; i < kMotorControlDim; ++i) {
-		policy_observation.motor_control[i] = actuator_motors.control[i];
-	}
-
+	fillPolicyObservation(policy_observation, observation, action, actuator_motors, degraded_flags, timing);
 	_policy_observation_pub.publish(policy_observation);
 }
 
@@ -638,8 +622,8 @@ void AmPosControl::publishAmTestResult(const RlToolsAdapter::Action &action, uin
 }
 
 void AmPosControl::applyAction(const RlToolsAdapter::Observation &observation, const RlToolsAdapter::Action &action,
-			       RlToolsAdapter::Action &executed_action, ActiveMode mode, bool publish_outputs,
-			       uint32_t degraded_flags)
+				       RlToolsAdapter::Action &executed_action, ActiveMode mode, bool publish_outputs,
+				       uint32_t degraded_flags, const PolicyObservationTiming &timing)
 {
 	actuator_motors_s actuator_motors{};
 	actuator_motors.timestamp = hrt_absolute_time();
@@ -665,7 +649,7 @@ void AmPosControl::applyAction(const RlToolsAdapter::Observation &observation, c
 	}
 
 	actuator_motors.reversible_flags = 0;
-	publishPolicyObservation(observation, action, actuator_motors, degraded_flags);
+	publishPolicyObservation(observation, action, actuator_motors, degraded_flags, timing);
 
 	if (publish_outputs) {
 		_actuator_motors_pub.publish(actuator_motors);
@@ -864,15 +848,31 @@ void AmPosControl::Run()
 	}
 
 	RlToolsAdapter::Observation observation{};
+	PolicyObservationTiming policy_timing{};
+	policy_timing.observation_build_timestamp = hrt_absolute_time();
+	policy_timing.vehicle_local_position_timestamp = _position.timestamp;
+	policy_timing.vehicle_local_position_timestamp_sample = _position.timestamp_sample;
+	policy_timing.vehicle_attitude_timestamp = _attitude.timestamp;
+	policy_timing.vehicle_attitude_timestamp_sample = _attitude.timestamp_sample;
+	policy_timing.vehicle_angular_velocity_timestamp = _angular_velocity.timestamp;
+	policy_timing.vehicle_angular_velocity_timestamp_sample = _angular_velocity.timestamp_sample;
+	policy_timing.arm_joint_state_timestamp = _arm_joint_state.timestamp;
+	policy_timing.arm_joint_state_timestamp_sample = _arm_joint_state.timestamp_sample;
+	policy_timing.trajectory_setpoint_timestamp = _trajectory_setpoint.timestamp;
+	policy_timing.offboard_control_mode_timestamp = _offboard_control_mode.timestamp;
 	buildObservation(observation);
 
 	RlToolsAdapter::Action action{};
+	policy_timing.policy_inference_start_timestamp = hrt_absolute_time();
+	const bool inference_ok = _adapter.infer(policy_timing.policy_inference_start_timestamp, observation, action);
+	policy_timing.policy_inference_finish_timestamp = hrt_absolute_time();
 
-	if (_adapter.infer(hrt_absolute_time(), observation, action)) {
+	if (inference_ok) {
 		maybeLogPolicyDiagnostics(observation, action);
 		RlToolsAdapter::Action executed_action{};
+		policy_timing.policy_sequence = ++_policy_sequence;
 		applyAction(observation, action, executed_action, mode, !am_test_mode,
-			    am_test_mode ? am_test_degraded_flags : am_policy_degraded_flags);
+			    am_test_mode ? am_test_degraded_flags : am_policy_degraded_flags, policy_timing);
 
 		if (am_test_mode) {
 			publishAmTestStatus(true, true, true, true, am_test_result_s::FAILURE_NONE, am_test_degraded_flags);

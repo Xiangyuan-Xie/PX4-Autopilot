@@ -1,5 +1,20 @@
 uint64 timestamp
 uint64 timestamp_sample
+uint64 observation_build_timestamp
+
+uint64 vehicle_local_position_timestamp
+uint64 vehicle_local_position_timestamp_sample
+uint64 vehicle_attitude_timestamp
+uint64 vehicle_attitude_timestamp_sample
+uint64 vehicle_angular_velocity_timestamp
+uint64 vehicle_angular_velocity_timestamp_sample
+uint64 arm_joint_state_timestamp
+uint64 arm_joint_state_timestamp_sample
+uint64 trajectory_setpoint_timestamp
+uint64 offboard_control_mode_timestamp
+uint64 policy_inference_start_timestamp
+uint64 policy_inference_finish_timestamp
+uint32 policy_sequence
 
 uint32 failure_flags
 uint32 degraded_flags

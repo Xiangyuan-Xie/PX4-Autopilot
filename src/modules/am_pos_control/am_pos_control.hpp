@@ -104,6 +104,64 @@ public:
 		}
 	}
 
+	struct PolicyObservationTiming {
+		hrt_abstime observation_build_timestamp{0};
+		hrt_abstime vehicle_local_position_timestamp{0};
+		hrt_abstime vehicle_local_position_timestamp_sample{0};
+		hrt_abstime vehicle_attitude_timestamp{0};
+		hrt_abstime vehicle_attitude_timestamp_sample{0};
+		hrt_abstime vehicle_angular_velocity_timestamp{0};
+		hrt_abstime vehicle_angular_velocity_timestamp_sample{0};
+		hrt_abstime arm_joint_state_timestamp{0};
+		hrt_abstime arm_joint_state_timestamp_sample{0};
+		hrt_abstime trajectory_setpoint_timestamp{0};
+		hrt_abstime offboard_control_mode_timestamp{0};
+		hrt_abstime policy_inference_start_timestamp{0};
+		hrt_abstime policy_inference_finish_timestamp{0};
+		uint32_t policy_sequence{0};
+	};
+
+	static void fillPolicyObservation(am_policy_observation_s &policy_observation,
+					  const RlToolsAdapter::Observation &observation,
+					  const RlToolsAdapter::Action &action,
+					  const actuator_motors_s &actuator_motors, uint32_t degraded_flags,
+					  const PolicyObservationTiming &timing)
+	{
+		policy_observation = {};
+		policy_observation.timestamp = actuator_motors.timestamp;
+		policy_observation.timestamp_sample = timing.vehicle_angular_velocity_timestamp_sample;
+		policy_observation.observation_build_timestamp = timing.observation_build_timestamp;
+		policy_observation.vehicle_local_position_timestamp = timing.vehicle_local_position_timestamp;
+		policy_observation.vehicle_local_position_timestamp_sample = timing.vehicle_local_position_timestamp_sample;
+		policy_observation.vehicle_attitude_timestamp = timing.vehicle_attitude_timestamp;
+		policy_observation.vehicle_attitude_timestamp_sample = timing.vehicle_attitude_timestamp_sample;
+		policy_observation.vehicle_angular_velocity_timestamp = timing.vehicle_angular_velocity_timestamp;
+		policy_observation.vehicle_angular_velocity_timestamp_sample = timing.vehicle_angular_velocity_timestamp_sample;
+		policy_observation.arm_joint_state_timestamp = timing.arm_joint_state_timestamp;
+		policy_observation.arm_joint_state_timestamp_sample = timing.arm_joint_state_timestamp_sample;
+		policy_observation.trajectory_setpoint_timestamp = timing.trajectory_setpoint_timestamp;
+		policy_observation.offboard_control_mode_timestamp = timing.offboard_control_mode_timestamp;
+		policy_observation.policy_inference_start_timestamp = timing.policy_inference_start_timestamp;
+		policy_observation.policy_inference_finish_timestamp = timing.policy_inference_finish_timestamp;
+		policy_observation.policy_sequence = timing.policy_sequence;
+		policy_observation.failure_flags = 0;
+		policy_observation.degraded_flags = degraded_flags;
+		policy_observation.am_setpoint_timestamp = timing.trajectory_setpoint_timestamp;
+
+		for (int i = 0; i < RlToolsAdapter::ObservationDim; ++i) {
+			policy_observation.observation[i] = observation[i];
+		}
+
+		for (int i = 0; i < kActionDim; ++i) {
+			policy_observation.raw_action[i] = action[i];
+			policy_observation.mapped_action[i] = actuator_motors.control[i];
+		}
+
+		for (int i = 0; i < kMotorControlDim; ++i) {
+			policy_observation.motor_control[i] = actuator_motors.control[i];
+		}
+	}
+
 	static bool vehicleStateValidStrict(const vehicle_local_position_s &position, bool attitude_valid,
 					    bool angular_velocity_valid, hrt_abstime now)
 	{
@@ -560,9 +618,10 @@ private:
 	void buildObservation(RlToolsAdapter::Observation &observation);
 	void applyAction(const RlToolsAdapter::Observation &observation, const RlToolsAdapter::Action &action,
 			 RlToolsAdapter::Action &executed_action, ActiveMode mode, bool publish_outputs,
-			 uint32_t degraded_flags = am_policy_observation_s::DEGRADED_NONE);
+			 uint32_t degraded_flags, const PolicyObservationTiming &timing);
 	void publishPolicyObservation(const RlToolsAdapter::Observation &observation, const RlToolsAdapter::Action &action,
-				      const actuator_motors_s &actuator_motors, uint32_t degraded_flags);
+				      const actuator_motors_s &actuator_motors, uint32_t degraded_flags,
+				      const PolicyObservationTiming &timing);
 	void publishAmTestStatus(bool vehicle_state_valid, bool arm_state_valid, bool am_setpoint_valid, bool am_valid,
 				 uint32_t failure_flags, uint32_t degraded_flags);
 	void publishAmTestResult(uint32_t failure_flags, uint32_t degraded_flags);
@@ -648,6 +707,7 @@ private:
 	float _manual_takeoff_release{0.0f};
 	hrt_abstime _manual_yaw_release_start{0};
 	int _startup_diag_samples_remaining{0};
+	uint32_t _policy_sequence{0};
 
 	RlToolsAdapter _adapter{};
 	TakeoffHandling _takeoff{};
