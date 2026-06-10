@@ -146,3 +146,21 @@ TEST(AmPosControlPolicyBlobTest, AdapterResetRestoresInitialHiddenState)
 
 	expectActionNear(inferWithAdapter(adapter, 21000, exportedExampleObservation()), exportedExampleOutput());
 }
+
+TEST(AmPosControlPolicyBlobTest, AdapterReusesCommittedActionBetweenNativeSteps)
+{
+	RlToolsAdapter adapter{};
+	ASSERT_TRUE(adapter.init());
+
+	const ObservationArray first_observation = exportedExampleObservation();
+	ObservationArray changed_observation = first_observation;
+
+	for (float &value : changed_observation) {
+		value += 0.25f;
+	}
+
+	const ActionArray first_action = inferWithAdapter(adapter, 1000, first_observation);
+	expectActionNear(inferWithAdapter(adapter, 3500, changed_observation), first_action);
+	expectActionNear(inferWithAdapter(adapter, 6000, changed_observation), first_action);
+	expectActionNear(inferWithAdapter(adapter, 8500, changed_observation), first_action);
+}

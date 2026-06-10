@@ -196,24 +196,21 @@ TEST(AmPosControlTest, FillAmOffboardHoldSetpointKeepsReferenceAndMarksDegraded)
 	EXPECT_EQ(degraded_flags, am_policy_observation_s::DEGRADED_SETPOINT_DEFAULTED);
 }
 
-TEST(AmPosControlTest, AmOffboardUsesExternalSetpointOnlyWhenModeAndTrajectoryAreValid)
+TEST(AmPosControlTest, AmOffboardUsesExternalSetpointOnlyForFreshVelocityCommands)
 {
 	offboard_control_mode_s offboard_control_mode{};
-	offboard_control_mode.position = true;
+	offboard_control_mode.velocity = true;
 
 	trajectory_setpoint_s setpoint{};
 	setpoint.timestamp = 1000;
-	setpoint.position[0] = 1.0f;
-	setpoint.position[1] = NAN;
-	setpoint.position[2] = NAN;
+	setpoint.velocity[0] = 1.0f;
+	setpoint.velocity[1] = NAN;
+	setpoint.velocity[2] = NAN;
 
 	EXPECT_TRUE(AmPosControl::amOffboardExternalSetpointUsable(offboard_control_mode, setpoint, true, true));
 	EXPECT_FALSE(AmPosControl::amOffboardExternalSetpointUsable(offboard_control_mode, setpoint, false, true));
 	EXPECT_FALSE(AmPosControl::amOffboardExternalSetpointUsable(offboard_control_mode, setpoint, true, false));
 
-	offboard_control_mode.position = false;
-	offboard_control_mode.velocity = true;
-	setpoint.position[0] = NAN;
 	setpoint.velocity[0] = NAN;
 	setpoint.velocity[1] = 2.0f;
 	EXPECT_TRUE(AmPosControl::amOffboardExternalSetpointUsable(offboard_control_mode, setpoint, true, true));
@@ -223,10 +220,44 @@ TEST(AmPosControlTest, AmOffboardUsesExternalSetpointOnlyWhenModeAndTrajectoryAr
 	EXPECT_FALSE(AmPosControl::amOffboardExternalSetpointUsable(offboard_control_mode, setpoint, true, true));
 }
 
-TEST(AmPosControlTest, AmOffboardDoesNotTreatYawOnlySetpointAsExternalPositionSetpoint)
+TEST(AmPosControlTest, AmOffboardControlModeSupportsVelocityOnlyCommands)
+{
+	offboard_control_mode_s offboard_control_mode{};
+	offboard_control_mode.velocity = true;
+
+	EXPECT_TRUE(AmPosControl::offboardControlModeSupported(offboard_control_mode));
+
+	offboard_control_mode.velocity = false;
+	offboard_control_mode.position = true;
+	EXPECT_FALSE(AmPosControl::offboardControlModeSupported(offboard_control_mode));
+
+	offboard_control_mode.position = false;
+	offboard_control_mode.velocity = true;
+	offboard_control_mode.attitude = true;
+	EXPECT_FALSE(AmPosControl::offboardControlModeSupported(offboard_control_mode));
+}
+
+TEST(AmPosControlTest, AmOffboardDoesNotTreatPositionOnlySetpointAsExternalCommand)
 {
 	offboard_control_mode_s offboard_control_mode{};
 	offboard_control_mode.position = true;
+
+	trajectory_setpoint_s setpoint{};
+	setpoint.timestamp = 1000;
+	setpoint.position[0] = 1.0f;
+	setpoint.position[1] = NAN;
+	setpoint.position[2] = NAN;
+	setpoint.velocity[0] = NAN;
+	setpoint.velocity[1] = NAN;
+	setpoint.velocity[2] = NAN;
+
+	EXPECT_FALSE(AmPosControl::amOffboardExternalSetpointUsable(offboard_control_mode, setpoint, true, true));
+}
+
+TEST(AmPosControlTest, AmOffboardDoesNotTreatYawOnlySetpointAsExternalCommand)
+{
+	offboard_control_mode_s offboard_control_mode{};
+	offboard_control_mode.velocity = true;
 
 	trajectory_setpoint_s setpoint{};
 	setpoint.timestamp = 1000;
@@ -791,6 +822,13 @@ TEST(AmPosControlTest, AdvanceAmTakeoffRampProgressFollowsTakeoffState)
 			takeoff_status_s::TAKEOFF_STATE_FLIGHT, false), 1.0f);
 	EXPECT_FLOAT_EQ(AmPosControl::advanceAmTakeoffRampProgress(0.2f, 0.1f, 1.0f,
 			takeoff_status_s::TAKEOFF_STATE_RAMPUP, true), 1.0f);
+}
+
+TEST(AmPosControlTest, PolicyStateCommitsOnlyAfterTakeoffRampCompletes)
+{
+	EXPECT_FALSE(AmPosControl::takeoffStateAllowsPolicyStateCommit(takeoff_status_s::TAKEOFF_STATE_READY_FOR_TAKEOFF));
+	EXPECT_FALSE(AmPosControl::takeoffStateAllowsPolicyStateCommit(takeoff_status_s::TAKEOFF_STATE_RAMPUP));
+	EXPECT_TRUE(AmPosControl::takeoffStateAllowsPolicyStateCommit(takeoff_status_s::TAKEOFF_STATE_FLIGHT));
 }
 
 TEST(AmPosControlTest, GroundedReadyStateRequiresOutputGate)

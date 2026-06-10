@@ -286,11 +286,6 @@ bool AmPosControl::offboardTrajectorySetpointValid() const
 		return false;
 	}
 
-	if (_offboard_control_mode.position) {
-		return PX4_ISFINITE(_trajectory_setpoint.position[0]) || PX4_ISFINITE(_trajectory_setpoint.position[1])
-		       || PX4_ISFINITE(_trajectory_setpoint.position[2]);
-	}
-
 	if (_offboard_control_mode.velocity) {
 		return PX4_ISFINITE(_trajectory_setpoint.velocity[0]) || PX4_ISFINITE(_trajectory_setpoint.velocity[1])
 		       || PX4_ISFINITE(_trajectory_setpoint.velocity[2]);
@@ -308,11 +303,7 @@ bool AmPosControl::offboardControlModeFresh() const
 
 bool AmPosControl::offboardControlModeSupported() const
 {
-	const bool position_or_velocity = _offboard_control_mode.position || _offboard_control_mode.velocity;
-	const bool unsupported = _offboard_control_mode.acceleration || _offboard_control_mode.attitude
-				 || _offboard_control_mode.body_rate || _offboard_control_mode.thrust_and_torque
-				 || _offboard_control_mode.direct_actuator;
-	return position_or_velocity && !unsupported;
+	return offboardControlModeSupported(_offboard_control_mode);
 }
 
 bool AmPosControl::offboardControlModeValid() const
@@ -864,6 +855,14 @@ void AmPosControl::Run()
 
 	updateTargets(use_default_am_test_setpoint, mode != ActiveMode::Manual);
 
+	const bool commit_policy_state = am_test_mode
+					 || takeoffStateAllowsPolicyStateCommit(static_cast<uint8_t>(_takeoff.getTakeoffState()));
+
+	if (!commit_policy_state) {
+		_adapter.reset();
+		resetActionHistory();
+	}
+
 	RlToolsAdapter::Observation observation{};
 	buildObservation(observation);
 
@@ -881,7 +880,14 @@ void AmPosControl::Run()
 		}
 
 		_am_offboard_using_external_setpoint = mode == ActiveMode::Offboard && am_offboard_using_external_setpoint;
-		updateActionHistory(executed_action);
+
+		if (commit_policy_state) {
+			updateActionHistory(executed_action);
+
+		} else {
+			_adapter.reset();
+			resetActionHistory();
+		}
 
 	} else {
 		if (am_test_mode) {

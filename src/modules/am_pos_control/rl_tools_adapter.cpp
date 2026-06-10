@@ -6,8 +6,6 @@
 
 #include "rl_tools_adapter.hpp"
 
-#include <cstring>
-
 bool RlToolsAdapter::init()
 {
 	if (!_runtime_initialized) {
@@ -61,11 +59,6 @@ bool RlToolsAdapter::infer(uint64_t now_us, const Observation &observation, Acti
 		_intermediate_steps_since_native = 0;
 
 	} else {
-		memcpy(&_policy_state_temp, &_policy_state, sizeof(_policy_state));
-		rlt::evaluate_step(_device, rlt::checkpoint::actor::module, _input, _policy_state_temp, _output, _policy_buffer, _rng, _mode);
-		for (int i = 0; i < ActionDim; ++i) {
-			_last_action[i] = rlt::get(_device, _output, 0, i);
-		}
 		++_intermediate_steps_since_native;
 	}
 

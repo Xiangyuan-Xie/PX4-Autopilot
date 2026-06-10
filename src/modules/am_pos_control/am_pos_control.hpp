@@ -188,17 +188,20 @@ public:
 			return false;
 		}
 
-		if (offboard_control_mode.position) {
-			return PX4_ISFINITE(setpoint.position[0]) || PX4_ISFINITE(setpoint.position[1])
-			       || PX4_ISFINITE(setpoint.position[2]);
-		}
-
 		if (offboard_control_mode.velocity) {
 			return PX4_ISFINITE(setpoint.velocity[0]) || PX4_ISFINITE(setpoint.velocity[1])
 			       || PX4_ISFINITE(setpoint.velocity[2]);
 		}
 
 		return false;
+	}
+
+	static bool offboardControlModeSupported(const offboard_control_mode_s &offboard_control_mode)
+	{
+		const bool unsupported = offboard_control_mode.acceleration || offboard_control_mode.attitude
+					 || offboard_control_mode.body_rate || offboard_control_mode.thrust_and_torque
+					 || offboard_control_mode.direct_actuator;
+		return offboard_control_mode.velocity && !unsupported;
 	}
 
 	static void fillThrustSetpointFromMotors(vehicle_thrust_setpoint_s &thrust_setpoint, hrt_abstime now,
@@ -353,6 +356,11 @@ public:
 		const bool not_taken_off = takeoff_state < takeoff_status_s::TAKEOFF_STATE_RAMPUP;
 		const bool flying_but_ground_contact = (takeoff_state >= takeoff_status_s::TAKEOFF_STATE_FLIGHT) && ground_contact;
 		return not_taken_off || flying_but_ground_contact;
+	}
+
+	static bool takeoffStateAllowsPolicyStateCommit(uint8_t takeoff_state)
+	{
+		return takeoff_state >= takeoff_status_s::TAKEOFF_STATE_FLIGHT;
 	}
 
 	static bool commandActive(float command)

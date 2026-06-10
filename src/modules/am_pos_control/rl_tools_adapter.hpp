@@ -39,9 +39,8 @@ public:
 	bool infer(uint64_t now_us, const Observation &observation, Action &action);
 
 private:
-	// Mirror the RAPTOR/L2F timing model locally: run a committed/native policy step at
-	// 100 Hz, allow intermediate evaluations in between, and keep the true hidden state
-	// unchanged on intermediate steps.
+	// Mirror the training control cadence: commit policy/RNN state at 100 Hz and hold the
+	// committed action between native steps.
 	static constexpr uint64_t kIntermediateStepUs = 2'500;
 	static constexpr uint64_t kNativeStepUs = 10'000;
 	static constexpr uint8_t kForceSyncNative = 4;
@@ -61,7 +60,6 @@ private:
 	Mode _mode{};
 	Policy::template Buffer<false> _policy_buffer{};
 	Policy::State<false> _policy_state{};
-	Policy::State<false> _policy_state_temp{};
 	InputTensor _input{};
 	OutputTensor _output{};
 };
