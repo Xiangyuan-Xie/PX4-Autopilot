@@ -446,39 +446,24 @@ TEST(AmPosControlTest, IdleMotorSetpointPublishesZeroThrustIntent)
 	EXPECT_FLOAT_EQ(thrust_setpoint.xyz[2], 0.0f);
 }
 
-TEST(AmPosControlTest, ManualTakeoffReleaseFollowsThrottleFromMinimumToCenter)
+TEST(AmPosControlTest, ManualThrottleOnlyTriggersTakeoffIntent)
 {
 	const float deadzone = 0.1f;
 
-	EXPECT_FLOAT_EQ(AmPosControl::manualTakeoffReleaseFromThrottle(-1.0f, deadzone), 0.0f);
-	EXPECT_FLOAT_EQ(AmPosControl::manualTakeoffReleaseFromThrottle(-0.9f, deadzone), 0.0f);
-	EXPECT_NEAR(AmPosControl::manualTakeoffReleaseFromThrottle(-0.45f, deadzone), 0.5f, 1e-6f);
-	EXPECT_FLOAT_EQ(AmPosControl::manualTakeoffReleaseFromThrottle(0.0f, deadzone), 1.0f);
-	EXPECT_FLOAT_EQ(AmPosControl::manualTakeoffReleaseFromThrottle(0.5f, deadzone), 1.0f);
+	EXPECT_FALSE(AmPosControl::manualThrottleWantsTakeoff(-1.0f, deadzone));
+	EXPECT_FALSE(AmPosControl::manualThrottleWantsTakeoff(-0.9f, deadzone));
+	EXPECT_TRUE(AmPosControl::manualThrottleWantsTakeoff(-0.899f, deadzone));
+	EXPECT_TRUE(AmPosControl::manualThrottleWantsTakeoff(0.0f, deadzone));
+	EXPECT_TRUE(AmPosControl::manualThrottleWantsTakeoff(0.5f, deadzone));
 }
 
-TEST(AmPosControlTest, ApplyMotorReleaseScalesPolicyMotorsAndPreservesNanChannels)
+TEST(AmPosControlTest, ConstrainUpwardVelocityNedLimitsOnlyUpwardDemand)
 {
-	actuator_motors_s actuator_motors{};
-	actuator_motors.control[0] = 0.8f;
-	actuator_motors.control[1] = 0.6f;
-	actuator_motors.control[2] = 0.4f;
-	actuator_motors.control[3] = 0.2f;
-
-	for (int i = 4; i < 12; ++i) {
-		actuator_motors.control[i] = NAN;
-	}
-
-	AmPosControl::applyMotorRelease(actuator_motors, 0.5f);
-
-	EXPECT_FLOAT_EQ(actuator_motors.control[0], 0.4f);
-	EXPECT_FLOAT_EQ(actuator_motors.control[1], 0.3f);
-	EXPECT_FLOAT_EQ(actuator_motors.control[2], 0.2f);
-	EXPECT_FLOAT_EQ(actuator_motors.control[3], 0.1f);
-
-	for (int i = 4; i < 12; ++i) {
-		EXPECT_TRUE(std::isnan(actuator_motors.control[i]));
-	}
+	EXPECT_FLOAT_EQ(AmPosControl::constrainUpwardVelocityNed(-2.0f, 0.5f), -0.5f);
+	EXPECT_FLOAT_EQ(AmPosControl::constrainUpwardVelocityNed(-0.25f, 0.5f), -0.25f);
+	EXPECT_FLOAT_EQ(AmPosControl::constrainUpwardVelocityNed(0.4f, 0.5f), 0.4f);
+	EXPECT_FLOAT_EQ(AmPosControl::constrainUpwardVelocityNed(-1.0f, 0.0f), 0.0f);
+	EXPECT_FLOAT_EQ(AmPosControl::constrainUpwardVelocityNed(NAN, 0.5f), 0.0f);
 }
 
 TEST(AmPosControlTest, GatedPositionErrorKeepsFullBodyErrorWhenLinearCommandInactive)
@@ -838,88 +823,11 @@ TEST(AmPosControlTest, InverseMappedMotorToActionClampsNormalizedCommands)
 	EXPECT_FLOAT_EQ(AmPosControl::inverseMappedMotorToAction(1.25f), 1.0f);
 }
 
-TEST(AmPosControlTest, FillActionHistoryFromMotorsUsesExecutedMotorCommands)
+TEST(AmPosControlTest, PolicyStateCommitsOncePolicyOutputCanDriveMotors)
 {
-	actuator_motors_s actuator_motors{};
-	actuator_motors.control[0] = 0.4f;
-	actuator_motors.control[1] = 0.3f;
-	actuator_motors.control[2] = 0.2f;
-	actuator_motors.control[3] = 0.1f;
-
-	RlToolsAdapter::Action action{};
-	AmPosControl::fillActionHistoryFromMotors(action, actuator_motors);
-
-	for (int i = 0; i < 4; ++i) {
-		EXPECT_NEAR(action[i], actuator_motors.control[i], 1e-5f);
-	}
-}
-
-TEST(AmPosControlTest, RampMotorOutputsForTakeoffScalesCollectiveAndDifferential)
-{
-	actuator_motors_s actuator_motors{};
-	actuator_motors.control[0] = 0.8f;
-	actuator_motors.control[1] = 0.6f;
-	actuator_motors.control[2] = 0.4f;
-	actuator_motors.control[3] = 0.2f;
-
-	for (int i = 4; i < 12; ++i) {
-		actuator_motors.control[i] = NAN;
-	}
-
-	AmPosControl::rampMotorOutputsForTakeoff(actuator_motors, 0.5f);
-
-	EXPECT_FLOAT_EQ(actuator_motors.control[0], 0.4f);
-	EXPECT_FLOAT_EQ(actuator_motors.control[1], 0.3f);
-	EXPECT_FLOAT_EQ(actuator_motors.control[2], 0.2f);
-	EXPECT_FLOAT_EQ(actuator_motors.control[3], 0.1f);
-
-	for (int i = 4; i < 12; ++i) {
-		EXPECT_TRUE(std::isnan(actuator_motors.control[i]));
-	}
-}
-
-TEST(AmPosControlTest, RampMotorOutputsForTakeoffZeroAndFullProgress)
-{
-	actuator_motors_s zero_progress{};
-	actuator_motors_s full_progress{};
-
-	for (int i = 0; i < 4; ++i) {
-		zero_progress.control[i] = 0.7f - 0.1f * i;
-		full_progress.control[i] = zero_progress.control[i];
-	}
-
-	for (int i = 4; i < 12; ++i) {
-		zero_progress.control[i] = NAN;
-		full_progress.control[i] = NAN;
-	}
-
-	AmPosControl::rampMotorOutputsForTakeoff(zero_progress, 0.0f);
-	AmPosControl::rampMotorOutputsForTakeoff(full_progress, 1.0f);
-
-	for (int i = 0; i < 4; ++i) {
-		EXPECT_FLOAT_EQ(zero_progress.control[i], 0.0f);
-		EXPECT_FLOAT_EQ(full_progress.control[i], 0.7f - 0.1f * i);
-	}
-}
-
-TEST(AmPosControlTest, AdvanceAmTakeoffRampProgressFollowsTakeoffState)
-{
-	EXPECT_FLOAT_EQ(AmPosControl::advanceAmTakeoffRampProgress(0.8f, 0.1f, 1.0f,
-			takeoff_status_s::TAKEOFF_STATE_READY_FOR_TAKEOFF, false), 0.0f);
-	EXPECT_FLOAT_EQ(AmPosControl::advanceAmTakeoffRampProgress(0.2f, 0.1f, 1.0f,
-			takeoff_status_s::TAKEOFF_STATE_RAMPUP, false), 0.3f);
-	EXPECT_FLOAT_EQ(AmPosControl::advanceAmTakeoffRampProgress(0.95f, 0.1f, 1.0f,
-			takeoff_status_s::TAKEOFF_STATE_RAMPUP, false), 1.0f);
-	EXPECT_FLOAT_EQ(AmPosControl::advanceAmTakeoffRampProgress(0.2f, 0.1f, 1.0f,
-			takeoff_status_s::TAKEOFF_STATE_FLIGHT, false), 1.0f);
-	EXPECT_FLOAT_EQ(AmPosControl::advanceAmTakeoffRampProgress(0.2f, 0.1f, 1.0f,
-			takeoff_status_s::TAKEOFF_STATE_RAMPUP, true), 1.0f);
-}
-
-TEST(AmPosControlTest, PolicyStateCommitsOnlyAfterTakeoffRampCompletes)
-{
+	EXPECT_FALSE(AmPosControl::takeoffStateAllowsPolicyStateCommit(takeoff_status_s::TAKEOFF_STATE_SPOOLUP));
 	EXPECT_FALSE(AmPosControl::takeoffStateAllowsPolicyStateCommit(takeoff_status_s::TAKEOFF_STATE_READY_FOR_TAKEOFF));
-	EXPECT_FALSE(AmPosControl::takeoffStateAllowsPolicyStateCommit(takeoff_status_s::TAKEOFF_STATE_RAMPUP));
+	EXPECT_TRUE(AmPosControl::takeoffStateAllowsPolicyStateCommit(takeoff_status_s::TAKEOFF_STATE_RAMPUP));
 	EXPECT_TRUE(AmPosControl::takeoffStateAllowsPolicyStateCommit(takeoff_status_s::TAKEOFF_STATE_FLIGHT));
 }
 
@@ -933,6 +841,11 @@ TEST(AmPosControlTest, RampupAndFlightWithoutGroundContactAllowOutput)
 {
 	EXPECT_FALSE(AmPosControl::takeoffStateRequiresOutputGate(takeoff_status_s::TAKEOFF_STATE_RAMPUP, false));
 	EXPECT_FALSE(AmPosControl::takeoffStateRequiresOutputGate(takeoff_status_s::TAKEOFF_STATE_FLIGHT, false));
+}
+
+TEST(AmPosControlTest, RampupWithGroundContactStillAllowsPolicyOutput)
+{
+	EXPECT_FALSE(AmPosControl::takeoffStateRequiresOutputGate(takeoff_status_s::TAKEOFF_STATE_RAMPUP, true));
 }
 
 TEST(AmPosControlTest, FlightWithGroundContactRequiresOutputGate)

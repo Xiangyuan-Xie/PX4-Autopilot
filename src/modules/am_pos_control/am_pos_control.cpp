@@ -116,8 +116,7 @@ void AmPosControl::resetState()
 	_root_lin_vel_b.zero();
 	_root_ang_vel_b.zero();
 	_heading_w = 0.0f;
-	_takeoff_output_ramp_progress = 0.0f;
-	_manual_takeoff_release = 0.0f;
+	_takeoff_ramped_speed_up = 0.0f;
 	_manual_yaw_release_start = 0;
 	_am_offboard_using_external_setpoint = false;
 	_policy_sequence = 0;
@@ -147,13 +146,9 @@ bool AmPosControl::updateTakeoffGate(ActiveMode mode, bool was_using_am_mode, fl
 	float speed_up = PX4_ISFINITE(_vehicle_constraints.speed_up) ? _vehicle_constraints.speed_up :
 			 _param_ampc_z_vel_up.get();
 
-	_manual_takeoff_release = 1.0f;
-
 	if (mode == ActiveMode::Manual) {
 		_sticks.checkAndUpdateStickInputs();
-		_manual_takeoff_release = manualTakeoffReleaseFromThrottle(_sticks.getThrottleZeroCentered(),
-					  _param_ampc_man_dz.get());
-		want_takeoff = _manual_takeoff_release > 0.0f;
+		want_takeoff = manualThrottleWantsTakeoff(_sticks.getThrottleZeroCentered(), _param_ampc_man_dz.get());
 	}
 
 	if (mode == ActiveMode::Offboard) {
@@ -166,12 +161,7 @@ bool AmPosControl::updateTakeoffGate(ActiveMode mode, bool was_using_am_mode, fl
 	_takeoff.updateTakeoffState(_vehicle_control_mode.flag_armed, _vehicle_land_detected.landed,
 				    want_takeoff, speed_up, skip_takeoff, _position.timestamp_sample);
 
-	if (_takeoff.getTakeoffState() >= TakeoffState::rampup) {
-		_takeoff.updateRamp(dt_s, speed_up);
-	}
-
-	_takeoff_output_ramp_progress = advanceAmTakeoffRampProgress(_takeoff_output_ramp_progress, dt_s,
-					_param_mpc_tko_ramp_t.get(), static_cast<uint8_t>(_takeoff.getTakeoffState()), skip_takeoff);
+	_takeoff_ramped_speed_up = _takeoff.updateRamp(dt_s, speed_up);
 
 	publishTakeoffStatus();
 
@@ -415,6 +405,15 @@ void AmPosControl::updateTargets(bool use_default_am_test_setpoint, bool respect
 		desired_vel_ned(i) = PX4_ISFINITE(_trajectory_setpoint.velocity[i]) ? _trajectory_setpoint.velocity[i] : 0.0f;
 	}
 
+	if (_takeoff.getTakeoffState() == TakeoffState::rampup) {
+		desired_vel_ned(2) = constrainUpwardVelocityNed(desired_vel_ned(2), _takeoff_ramped_speed_up);
+
+		if (PX4_ISFINITE(_trajectory_setpoint.position[2]) && PX4_ISFINITE(_position.z)
+		    && (_trajectory_setpoint.position[2] < _position.z)) {
+			desired_vel_ned(2) = constrainUpwardVelocityNed(-_takeoff_ramped_speed_up, _takeoff_ramped_speed_up);
+		}
+	}
+
 	const matrix::Vector3f desired_vel_w = positionNedToEnu(desired_vel_ned);
 	matrix::Vector3f desired_ang_vel_w{};
 	desired_ang_vel_w.zero();
@@ -441,6 +440,10 @@ void AmPosControl::updateTargets(bool use_default_am_test_setpoint, bool respect
 	const matrix::Vector3f desired_vel_h = desired_quat_w.inversed().rotateVector(desired_vel_w);
 	bool lin_active_h[3] {};
 	activeAxesFromCommand(desired_vel_h, lin_active_h);
+
+	if (_takeoff.getTakeoffState() == TakeoffState::rampup) {
+		lin_active_h[2] = true;
+	}
 
 	matrix::Vector3f desired_pos_ned = positionEnuToNed(_current_cmd_ref.desired_pos_w);
 
@@ -638,16 +641,6 @@ void AmPosControl::applyAction(const RlToolsAdapter::Observation &observation, c
 		actuator_motors.control[i] = NAN;
 	}
 
-	const bool manual_takeoff_release_active = mode == ActiveMode::Manual
-			&& _takeoff.getTakeoffState() < TakeoffState::flight;
-
-	if (publish_outputs && manual_takeoff_release_active) {
-		applyMotorRelease(actuator_motors, _manual_takeoff_release);
-
-	} else if (publish_outputs && _takeoff.getTakeoffState() == TakeoffState::rampup) {
-		rampMotorOutputsForTakeoff(actuator_motors, _takeoff_output_ramp_progress);
-	}
-
 	actuator_motors.reversible_flags = 0;
 	publishPolicyObservation(observation, action, actuator_motors, degraded_flags, timing);
 
@@ -729,7 +722,7 @@ void AmPosControl::Run()
 	if (_use_am_mode && !was_using_am_mode) {
 		resetCommandReference();
 		resetActionHistory();
-		_takeoff_output_ramp_progress = 0.0f;
+		_takeoff_ramped_speed_up = 0.0f;
 		_am_offboard_using_external_setpoint = false;
 		_adapter.reset();
 		_startup_diag_samples_remaining = kStartupDiagSamples;
@@ -740,7 +733,7 @@ void AmPosControl::Run()
 			publishStopSetpoint();
 			resetCommandReference();
 			resetActionHistory();
-			_takeoff_output_ramp_progress = 0.0f;
+			_takeoff_ramped_speed_up = 0.0f;
 			_am_offboard_using_external_setpoint = false;
 			_adapter.reset();
 		}

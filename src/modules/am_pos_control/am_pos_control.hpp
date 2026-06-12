@@ -310,77 +310,23 @@ public:
 		return math::constrain(motor_control, 0.0f, 1.0f);
 	}
 
-	static float manualTakeoffReleaseFromThrottle(float throttle_zero_centered, float deadzone)
+	static bool manualThrottleWantsTakeoff(float throttle_zero_centered, float deadzone)
 	{
 		deadzone = math::constrain(deadzone, 0.0f, 0.99f);
-		const float release = (throttle_zero_centered + 1.0f - deadzone) / (1.0f - deadzone);
-		return release <= FLT_EPSILON ? 0.0f : math::constrain(release, 0.0f, 1.0f);
+		return throttle_zero_centered > -1.0f + deadzone;
 	}
 
-	static void applyMotorRelease(actuator_motors_s &actuator_motors, float release)
+	static float constrainUpwardVelocityNed(float velocity_z_ned, float ramped_speed_up)
 	{
-		release = math::constrain(release, 0.0f, 1.0f);
-
-		for (int i = 0; i < kActionDim; ++i) {
-			const float control = PX4_ISFINITE(actuator_motors.control[i]) ? actuator_motors.control[i] : 0.0f;
-			actuator_motors.control[i] = math::constrain(control * release, 0.0f, 1.0f);
-		}
-
-		for (int i = kActionDim; i < kMotorControlDim; ++i) {
-			actuator_motors.control[i] = NAN;
-		}
-	}
-
-	static void fillActionHistoryFromMotors(RlToolsAdapter::Action &action_history,
-						const actuator_motors_s &actuator_motors)
-	{
-		for (int i = 0; i < kActionDim; ++i) {
-			const float control = PX4_ISFINITE(actuator_motors.control[i]) ? actuator_motors.control[i] : 0.0f;
-			action_history[i] = inverseMappedMotorToAction(control);
-		}
-	}
-
-	static void rampMotorOutputsForTakeoff(actuator_motors_s &actuator_motors, float ramp_progress)
-	{
-		ramp_progress = math::constrain(ramp_progress, 0.0f, 1.0f);
-
-		float collective = 0.0f;
-
-		for (int i = 0; i < kActionDim; ++i) {
-			collective += PX4_ISFINITE(actuator_motors.control[i]) ? actuator_motors.control[i] : 0.0f;
-		}
-
-		collective /= static_cast<float>(kActionDim);
-		const float ramped_collective = collective * ramp_progress;
-
-		for (int i = 0; i < kActionDim; ++i) {
-			const float control = PX4_ISFINITE(actuator_motors.control[i]) ? actuator_motors.control[i] : collective;
-			const float differential = control - collective;
-			actuator_motors.control[i] = math::constrain(ramped_collective + differential * ramp_progress,
-						     0.0f, 1.0f);
-		}
-
-		for (int i = kActionDim; i < kMotorControlDim; ++i) {
-			actuator_motors.control[i] = NAN;
-		}
-	}
-
-	static float advanceAmTakeoffRampProgress(float current_progress, float dt_s, float ramp_time_s,
-			uint8_t takeoff_state, bool skip_takeoff)
-	{
-		if (skip_takeoff || takeoff_state >= takeoff_status_s::TAKEOFF_STATE_FLIGHT) {
-			return 1.0f;
-		}
-
-		if (takeoff_state < takeoff_status_s::TAKEOFF_STATE_RAMPUP) {
+		if (!PX4_ISFINITE(velocity_z_ned)) {
 			return 0.0f;
 		}
 
-		if (ramp_time_s <= dt_s) {
-			return 1.0f;
+		if (!PX4_ISFINITE(ramped_speed_up) || ramped_speed_up <= 0.0f) {
+			return math::max(velocity_z_ned, 0.0f);
 		}
 
-		return math::constrain(current_progress + dt_s / ramp_time_s, 0.0f, 1.0f);
+		return math::max(velocity_z_ned, -ramped_speed_up);
 	}
 
 	static bool offboardSetpointWantsTakeoff(const trajectory_setpoint_s &setpoint,
@@ -418,7 +364,7 @@ public:
 
 	static bool takeoffStateAllowsPolicyStateCommit(uint8_t takeoff_state)
 	{
-		return takeoff_state >= takeoff_status_s::TAKEOFF_STATE_FLIGHT;
+		return takeoff_state >= takeoff_status_s::TAKEOFF_STATE_RAMPUP;
 	}
 
 	static bool commandActive(float command)
@@ -703,8 +649,7 @@ private:
 	matrix::Vector3f _root_ang_vel_b{};
 	float _heading_w{0.0f};
 	float _prev_action[kActionDim] {0.f, 0.f, 0.f, 0.f};
-	float _takeoff_output_ramp_progress{0.0f};
-	float _manual_takeoff_release{0.0f};
+	float _takeoff_ramped_speed_up{0.0f};
 	hrt_abstime _manual_yaw_release_start{0};
 	int _startup_diag_samples_remaining{0};
 	uint32_t _policy_sequence{0};
