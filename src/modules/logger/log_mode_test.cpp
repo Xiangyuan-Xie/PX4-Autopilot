@@ -6,12 +6,6 @@
 
 using px4::logger::Logger;
 
-TEST(LoggerLogModeTest, StartsDisarmedAmTestLogging)
-{
-	EXPECT_TRUE(Logger::should_start_file_log(Logger::LogMode::while_armed, false, false,
-			vehicle_status_s::NAVIGATION_STATE_AM_TEST));
-}
-
 TEST(LoggerLogModeTest, DoesNotStartDisarmedDefaultMode)
 {
 	EXPECT_FALSE(Logger::should_start_file_log(Logger::LogMode::while_armed, false, false,
@@ -24,7 +18,7 @@ TEST(LoggerLogModeTest, StartsWhenArmedInAnyMode)
 			vehicle_status_s::NAVIGATION_STATE_POSCTL));
 }
 
-TEST(LoggerLogModeTest, AmTestDoesNotLatchArmUntilShutdown)
+TEST(LoggerLogModeTest, DisarmedDefaultModeDoesNotLatchArmUntilShutdown)
 {
 	const bool arm_until_shutdown_latched = false;
 
@@ -32,12 +26,12 @@ TEST(LoggerLogModeTest, AmTestDoesNotLatchArmUntilShutdown)
 					  vehicle_status_s::NAVIGATION_STATE_POSCTL));
 }
 
-TEST(LoggerLogModeTest, AmTestStartsWithoutArmUntilShutdownLatch)
+TEST(LoggerLogModeTest, DoesNotStartWithoutArmUntilShutdownLatch)
 {
 	const bool arm_until_shutdown_latched = false;
 
-	EXPECT_TRUE(Logger::should_start_file_log(Logger::LogMode::arm_until_shutdown, arm_until_shutdown_latched, false,
-			vehicle_status_s::NAVIGATION_STATE_AM_TEST));
+	EXPECT_FALSE(Logger::should_start_file_log(Logger::LogMode::arm_until_shutdown, arm_until_shutdown_latched, false,
+			vehicle_status_s::NAVIGATION_STATE_POSCTL));
 	EXPECT_FALSE(Logger::arm_until_shutdown_latched_after_update(Logger::LogMode::arm_until_shutdown,
 			arm_until_shutdown_latched, false));
 }

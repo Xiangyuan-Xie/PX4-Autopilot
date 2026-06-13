@@ -76,8 +76,6 @@ void LoggedTopics::add_default_topics()
 	add_optional_topic("external_ins_local_position");
 	add_topic("am_pos_control_status", 200);
 	add_topic("am_policy_observation");
-	add_topic("am_test_result", 100);
-	add_topic("am_test_status", 100);
 	add_topic("arm_joint_state", 100);
 	// add_optional_topic("esc_status", 250);
 	add_topic("esc_status");

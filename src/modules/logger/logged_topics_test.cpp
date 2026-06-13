@@ -4,8 +4,6 @@
 
 #include <uORB/topics/am_pos_control_status.h>
 #include <uORB/topics/am_policy_observation.h>
-#include <uORB/topics/am_test_result.h>
-#include <uORB/topics/am_test_status.h>
 #include <uORB/topics/arm_joint_state.h>
 #include <uORB/topics/neural_control.h>
 #include <uORB/uORBManager.hpp>
@@ -34,8 +32,6 @@ TEST_F(LoggedTopicsTest, DefaultProfileLogsAmTopics)
 
 	EXPECT_TRUE(topics.has_subscription(ORB_ID(am_pos_control_status)));
 	EXPECT_TRUE(topics.has_subscription(ORB_ID(am_policy_observation)));
-	EXPECT_TRUE(topics.has_subscription(ORB_ID(am_test_result)));
-	EXPECT_TRUE(topics.has_subscription(ORB_ID(am_test_status)));
 	EXPECT_TRUE(topics.has_subscription(ORB_ID(arm_joint_state)));
 	EXPECT_TRUE(topics.has_subscription(ORB_ID(neural_control)));
 }

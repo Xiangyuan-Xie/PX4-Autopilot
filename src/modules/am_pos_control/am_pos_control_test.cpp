@@ -23,65 +23,6 @@ vehicle_local_position_s validLocalPosition()
 }
 }
 
-TEST(AmPosControlTest, FillAmTestResultFromActionClampsNormalizedMotorControls)
-{
-	const hrt_abstime now = 123456;
-	const hrt_abstime sample = 123000;
-	const hrt_abstime setpoint = 120000;
-	const RlToolsAdapter::Action action{0.f, 0.25f, 0.75f, 1.25f};
-
-	am_test_result_s result{};
-	AmPosControl::fillAmTestResultFromAction(result, now, sample, setpoint, action);
-
-	EXPECT_EQ(result.timestamp, now);
-	EXPECT_EQ(result.timestamp_sample, sample);
-	EXPECT_EQ(result.am_setpoint_timestamp, setpoint);
-	EXPECT_TRUE(result.am_valid);
-	EXPECT_EQ(result.failure_flags, am_test_result_s::FAILURE_NONE);
-	EXPECT_EQ(result.degraded_flags, 0u);
-
-	for (int i = 0; i < 4; ++i) {
-		EXPECT_FLOAT_EQ(result.am_raw_action[i], action[i]);
-		EXPECT_GE(result.am_mapped_action[i], 0.f);
-		EXPECT_LE(result.am_mapped_action[i], 1.f);
-		EXPECT_FLOAT_EQ(result.am_motor_control[i], result.am_mapped_action[i]);
-	}
-
-	EXPECT_FLOAT_EQ(result.am_mapped_action[0], 0.0f);
-	EXPECT_FLOAT_EQ(result.am_mapped_action[1], 0.25f);
-	EXPECT_FLOAT_EQ(result.am_mapped_action[2], 0.75f);
-	EXPECT_FLOAT_EQ(result.am_mapped_action[3], 1.0f);
-
-	for (int i = 4; i < 12; ++i) {
-		EXPECT_TRUE(std::isnan(result.am_motor_control[i]));
-	}
-}
-
-TEST(AmPosControlTest, FillInvalidAmTestResultUsesNanControlsAndFailureFlag)
-{
-	am_test_result_s result{};
-	AmPosControl::fillInvalidAmTestResult(result, 10, 20, 30, am_test_result_s::FAILURE_AM_SETPOINT_INVALID);
-
-	EXPECT_EQ(result.timestamp, 10);
-	EXPECT_EQ(result.timestamp_sample, 20);
-	EXPECT_EQ(result.am_setpoint_timestamp, 30);
-	EXPECT_FALSE(result.am_valid);
-	EXPECT_EQ(result.failure_flags, am_test_result_s::FAILURE_AM_SETPOINT_INVALID);
-	EXPECT_EQ(result.degraded_flags, 0u);
-
-	for (float value : result.am_raw_action) {
-		EXPECT_TRUE(std::isnan(value));
-	}
-
-	for (float value : result.am_mapped_action) {
-		EXPECT_TRUE(std::isnan(value));
-	}
-
-	for (float value : result.am_motor_control) {
-		EXPECT_TRUE(std::isnan(value));
-	}
-}
-
 TEST(AmPosControlTest, FillPolicyObservationIncludesSourceTiming)
 {
 	RlToolsAdapter::Observation observation{};
@@ -113,11 +54,15 @@ TEST(AmPosControlTest, FillPolicyObservationIncludesSourceTiming)
 	timing.vehicle_angular_velocity_timestamp_sample = 7200;
 	timing.arm_joint_state_timestamp = 7310;
 	timing.arm_joint_state_timestamp_sample = 7300;
+	timing.arm_joint_state_sequence = 77;
 	timing.trajectory_setpoint_timestamp = 7400;
 	timing.offboard_control_mode_timestamp = 7500;
 	timing.policy_inference_start_timestamp = 8100;
 	timing.policy_inference_finish_timestamp = 8125;
 	timing.policy_sequence = 42;
+	timing.takeoff_state = takeoff_status_s::TAKEOFF_STATE_RAMPUP;
+	timing.takeoff_ramp_scale = 0.25f;
+	timing.takeoff_ramped_speed_up = 0.25f;
 
 	am_policy_observation_s policy_observation{};
 	AmPosControl::fillPolicyObservation(policy_observation, observation, action, actuator_motors,
@@ -125,9 +70,7 @@ TEST(AmPosControlTest, FillPolicyObservationIncludesSourceTiming)
 
 	EXPECT_EQ(policy_observation.timestamp, actuator_motors.timestamp);
 	EXPECT_EQ(policy_observation.timestamp_sample, timing.vehicle_angular_velocity_timestamp_sample);
-	EXPECT_EQ(policy_observation.failure_flags, 0u);
 	EXPECT_EQ(policy_observation.degraded_flags, am_policy_observation_s::DEGRADED_SETPOINT_DEFAULTED);
-	EXPECT_EQ(policy_observation.am_setpoint_timestamp, timing.trajectory_setpoint_timestamp);
 	EXPECT_EQ(policy_observation.observation_build_timestamp, timing.observation_build_timestamp);
 	EXPECT_EQ(policy_observation.vehicle_local_position_timestamp, timing.vehicle_local_position_timestamp);
 	EXPECT_EQ(policy_observation.vehicle_local_position_timestamp_sample, timing.vehicle_local_position_timestamp_sample);
@@ -137,11 +80,15 @@ TEST(AmPosControlTest, FillPolicyObservationIncludesSourceTiming)
 	EXPECT_EQ(policy_observation.vehicle_angular_velocity_timestamp_sample, timing.vehicle_angular_velocity_timestamp_sample);
 	EXPECT_EQ(policy_observation.arm_joint_state_timestamp, timing.arm_joint_state_timestamp);
 	EXPECT_EQ(policy_observation.arm_joint_state_timestamp_sample, timing.arm_joint_state_timestamp_sample);
+	EXPECT_EQ(policy_observation.arm_joint_state_sequence, timing.arm_joint_state_sequence);
 	EXPECT_EQ(policy_observation.trajectory_setpoint_timestamp, timing.trajectory_setpoint_timestamp);
 	EXPECT_EQ(policy_observation.offboard_control_mode_timestamp, timing.offboard_control_mode_timestamp);
 	EXPECT_EQ(policy_observation.policy_inference_start_timestamp, timing.policy_inference_start_timestamp);
 	EXPECT_EQ(policy_observation.policy_inference_finish_timestamp, timing.policy_inference_finish_timestamp);
 	EXPECT_EQ(policy_observation.policy_sequence, timing.policy_sequence);
+	EXPECT_EQ(policy_observation.takeoff_state, timing.takeoff_state);
+	EXPECT_FLOAT_EQ(policy_observation.takeoff_ramp_scale, timing.takeoff_ramp_scale);
+	EXPECT_FLOAT_EQ(policy_observation.takeoff_ramped_speed_up, timing.takeoff_ramped_speed_up);
 
 	for (int i = 0; i < RlToolsAdapter::ObservationDim; ++i) {
 		EXPECT_FLOAT_EQ(policy_observation.observation[i], observation[i]);
@@ -150,15 +97,6 @@ TEST(AmPosControlTest, FillPolicyObservationIncludesSourceTiming)
 	for (int i = 0; i < 4; ++i) {
 		EXPECT_FLOAT_EQ(policy_observation.raw_action[i], action[i]);
 		EXPECT_FLOAT_EQ(policy_observation.mapped_action[i], actuator_motors.control[i]);
-	}
-
-	for (int i = 0; i < 12; ++i) {
-		if (i < 4) {
-			EXPECT_FLOAT_EQ(policy_observation.motor_control[i], actuator_motors.control[i]);
-
-		} else {
-			EXPECT_TRUE(std::isnan(policy_observation.motor_control[i]));
-		}
 	}
 }
 
@@ -172,28 +110,6 @@ TEST(AmPosControlTest, ArmJointStateCarriesSampleTimestampAndSequence)
 	EXPECT_EQ(arm_joint_state.timestamp, 2000u);
 	EXPECT_EQ(arm_joint_state.timestamp_sample, 1900u);
 	EXPECT_EQ(arm_joint_state.sequence, 7u);
-}
-
-TEST(AmPosControlTest, AmTestLocalPositionAllowsInvalidFiniteXyForDegradedLogging)
-{
-	vehicle_local_position_s position{};
-	position.timestamp = 1;
-	position.x = 1.f;
-	position.y = -2.f;
-	position.z = 3.f;
-	position.vx = 0.1f;
-	position.vy = -0.2f;
-	position.vz = 0.3f;
-	position.heading = 0.4f;
-	position.xy_valid = false;
-	position.z_valid = true;
-	position.v_xy_valid = false;
-	position.v_z_valid = true;
-
-	uint32_t degraded_flags = am_test_result_s::DEGRADED_NONE;
-	EXPECT_TRUE(AmPosControl::vehicleStateValidForAmTest(position, true, true, 1, degraded_flags));
-	EXPECT_EQ(degraded_flags, am_test_result_s::DEGRADED_LOCAL_XY_INVALID
-		  | am_test_result_s::DEGRADED_LOCAL_VXY_INVALID);
 }
 
 TEST(AmPosControlTest, StrictLocalPositionRejectsInvalidXy)
@@ -222,51 +138,6 @@ TEST(AmPosControlTest, StrictVehicleStateRejectsInvalidLocalXyFlags)
 	position.v_xy_valid = false;
 
 	EXPECT_FALSE(AmPosControl::vehicleStateValidStrict(position, true, true, 1500));
-}
-
-TEST(AmPosControlTest, AmTestVehicleStateAllowsFiniteInvalidLocalXyFlagsAsDegraded)
-{
-	vehicle_local_position_s position = validLocalPosition();
-	position.xy_valid = false;
-	position.v_xy_valid = false;
-
-	uint32_t degraded_flags = 0;
-
-	EXPECT_TRUE(AmPosControl::vehicleStateValidForAmTest(position, true, true, 1500, degraded_flags));
-	EXPECT_EQ(degraded_flags, am_test_result_s::DEGRADED_LOCAL_XY_INVALID
-		  | am_test_result_s::DEGRADED_LOCAL_VXY_INVALID);
-}
-
-TEST(AmPosControlTest, AmTestVehicleStateRejectsNonFiniteInvalidLocalXyValues)
-{
-	vehicle_local_position_s position = validLocalPosition();
-	position.xy_valid = false;
-	position.x = NAN;
-
-	uint32_t degraded_flags = 0;
-
-	EXPECT_FALSE(AmPosControl::vehicleStateValidForAmTest(position, true, true, 1500, degraded_flags));
-}
-
-TEST(AmPosControlTest, FillDefaultAmTestSetpointUsesCurrentPoseAndMarksDegraded)
-{
-	const vehicle_local_position_s position = validLocalPosition();
-
-	trajectory_setpoint_s setpoint{};
-	uint32_t degraded_flags = 0;
-
-	AmPosControl::fillDefaultAmTestSetpoint(setpoint, 2000, position, degraded_flags);
-
-	EXPECT_EQ(setpoint.timestamp, 2000);
-	EXPECT_FLOAT_EQ(setpoint.position[0], position.x);
-	EXPECT_FLOAT_EQ(setpoint.position[1], position.y);
-	EXPECT_FLOAT_EQ(setpoint.position[2], position.z);
-	EXPECT_FLOAT_EQ(setpoint.velocity[0], 0.0f);
-	EXPECT_FLOAT_EQ(setpoint.velocity[1], 0.0f);
-	EXPECT_FLOAT_EQ(setpoint.velocity[2], 0.0f);
-	EXPECT_FLOAT_EQ(setpoint.yaw, position.heading);
-	EXPECT_FLOAT_EQ(setpoint.yawspeed, 0.0f);
-	EXPECT_EQ(degraded_flags, am_test_result_s::DEGRADED_SETPOINT_DEFAULTED);
 }
 
 TEST(AmPosControlTest, FillAmOffboardHoldSetpointKeepsReferenceAndMarksDegraded)
@@ -779,8 +650,6 @@ TEST(AmPosControlTest, OffboardYawRateActiveKeepsCommandZeroEpsSemantics)
 
 	EXPECT_TRUE(AmPosControl::yawRateActiveForMode(0.03f, false, AmPosControl::ActiveMode::Offboard,
 			release_start, 1_s));
-	EXPECT_TRUE(AmPosControl::yawRateActiveForMode(0.03f, false, AmPosControl::ActiveMode::Test,
-			release_start, 1_s));
 	EXPECT_FALSE(AmPosControl::yawRateActiveForMode(0.03f, false, AmPosControl::ActiveMode::Manual,
 			release_start, 1_s));
 }
@@ -810,6 +679,45 @@ TEST(AmPosControlTest, ClampNormalizedMotorControlIsIdentityInsideActionRange)
 	EXPECT_FLOAT_EQ(AmPosControl::clampNormalizedMotorControl(-0.25f), 0.0f);
 	EXPECT_FLOAT_EQ(AmPosControl::clampNormalizedMotorControl(0.5f), 0.5f);
 	EXPECT_FLOAT_EQ(AmPosControl::clampNormalizedMotorControl(1.25f), 1.0f);
+}
+
+TEST(AmPosControlTest, TakeoffRampOutputScaleGatesUntilRampupAndReachesFullScaleInFlight)
+{
+	EXPECT_FLOAT_EQ(AmPosControl::takeoffRampOutputScale(takeoff_status_s::TAKEOFF_STATE_SPOOLUP, 0.5f, 1.0f), 0.0f);
+	EXPECT_FLOAT_EQ(AmPosControl::takeoffRampOutputScale(takeoff_status_s::TAKEOFF_STATE_READY_FOR_TAKEOFF, 0.5f,
+			1.0f), 0.0f);
+	EXPECT_FLOAT_EQ(AmPosControl::takeoffRampOutputScale(takeoff_status_s::TAKEOFF_STATE_RAMPUP, 0.0f, 1.0f), 0.0f);
+	EXPECT_FLOAT_EQ(AmPosControl::takeoffRampOutputScale(takeoff_status_s::TAKEOFF_STATE_RAMPUP, 0.25f, 1.0f),
+			0.25f);
+	EXPECT_FLOAT_EQ(AmPosControl::takeoffRampOutputScale(takeoff_status_s::TAKEOFF_STATE_RAMPUP, 1.5f, 1.0f), 1.0f);
+	EXPECT_FLOAT_EQ(AmPosControl::takeoffRampOutputScale(takeoff_status_s::TAKEOFF_STATE_RAMPUP, NAN, 1.0f), 0.0f);
+	EXPECT_FLOAT_EQ(AmPosControl::takeoffRampOutputScale(takeoff_status_s::TAKEOFF_STATE_RAMPUP, 0.5f, NAN), 0.0f);
+	EXPECT_FLOAT_EQ(AmPosControl::takeoffRampOutputScale(takeoff_status_s::TAKEOFF_STATE_FLIGHT, 0.0f, 1.0f), 1.0f);
+}
+
+TEST(AmPosControlTest, MotorSetpointFromActionUsesTakeoffRampScaleForExecutedOutput)
+{
+	const RlToolsAdapter::Action action{-0.5f, 0.5f, 1.5f, 0.25f};
+	RlToolsAdapter::Action executed_action{};
+	actuator_motors_s actuator_motors{};
+
+	AmPosControl::fillMotorSetpointFromAction(actuator_motors, executed_action, action, 2000, 1500, 0.4f);
+
+	EXPECT_EQ(actuator_motors.timestamp, 2000);
+	EXPECT_EQ(actuator_motors.timestamp_sample, 1500);
+	EXPECT_EQ(actuator_motors.reversible_flags, 0u);
+	EXPECT_FLOAT_EQ(actuator_motors.control[0], 0.0f);
+	EXPECT_FLOAT_EQ(actuator_motors.control[1], 0.2f);
+	EXPECT_FLOAT_EQ(actuator_motors.control[2], 0.4f);
+	EXPECT_FLOAT_EQ(actuator_motors.control[3], 0.1f);
+
+	for (int i = 0; i < 4; ++i) {
+		EXPECT_FLOAT_EQ(executed_action[i], actuator_motors.control[i]);
+	}
+
+	for (int i = 4; i < 12; ++i) {
+		EXPECT_TRUE(std::isnan(actuator_motors.control[i]));
+	}
 }
 
 TEST(AmPosControlTest, PolicyStateCommitsOncePolicyOutputCanDriveMotors)

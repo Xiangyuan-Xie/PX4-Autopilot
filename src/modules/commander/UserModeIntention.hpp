@@ -76,9 +76,9 @@ public:
 	bool change(uint8_t user_intended_nav_state, ModeChangeSource source = ModeChangeSource::User,
 		    bool allow_fallback = false, bool force = false);
 
-	static bool modeChangeAllowedByArmingState(bool armed, uint8_t nav_state)
+	static bool modeChangeAllowedByArmingState(bool, uint8_t)
 	{
-		return nav_state != vehicle_status_s::NAVIGATION_STATE_AM_TEST || !armed;
+		return true;
 	}
 
 	uint8_t get() const { return _user_intented_nav_state; }

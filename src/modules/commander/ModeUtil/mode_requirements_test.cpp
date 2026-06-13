@@ -40,19 +40,13 @@ TEST(ModeRequirementsTest, AddsOnlyAmPosControlRequirementForDedicatedAmOffboard
 	EXPECT_NE(flags.mode_req_other & am_offboard_mask, 0u);
 }
 
-TEST(ModeRequirementsTest, AmTestIsExternallySelectableAndDoesNotPreventArming)
+TEST(ModeRequirementsTest, ReservedNavStateSlot11IsNotSelectable)
 {
-	failsafe_flags_s flags{};
-
-	mode_util::getModeRequirements(vehicle_status_s::VEHICLE_TYPE_ROTARY_WING, flags);
-
-	const uint32_t am_test_mask = 1u << vehicle_status_s::NAVIGATION_STATE_AM_TEST;
-
-	EXPECT_EQ(flags.mode_req_prevent_arming & am_test_mask, 0u);
-	EXPECT_EQ(mode_util::getValidNavStates() & am_test_mask, am_test_mask);
+	EXPECT_EQ(vehicle_status_s::NAVIGATION_STATE_FREE5, 11);
+	EXPECT_EQ(mode_util::getValidNavStates() & (1u << vehicle_status_s::NAVIGATION_STATE_FREE5), 0u);
 }
 
-TEST(ModeRequirementsTest, AmTestIsAdvertisedAsRegularMode)
+TEST(ModeRequirementsTest, ReservedNavStateSlot11IsAdvancedByDefault)
 {
-	EXPECT_FALSE(mode_util::isAdvanced(vehicle_status_s::NAVIGATION_STATE_AM_TEST));
+	EXPECT_TRUE(mode_util::isAdvanced(vehicle_status_s::NAVIGATION_STATE_FREE5));
 }

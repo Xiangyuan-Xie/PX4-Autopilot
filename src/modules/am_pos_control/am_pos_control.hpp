@@ -22,8 +22,6 @@
 #include <uORB/topics/actuator_motors.h>
 #include <uORB/topics/am_pos_control_status.h>
 #include <uORB/topics/am_policy_observation.h>
-#include <uORB/topics/am_test_result.h>
-#include <uORB/topics/am_test_status.h>
 #include <uORB/topics/arm_joint_state.h>
 #include <uORB/topics/offboard_control_mode.h>
 #include <uORB/topics/parameter_update.h>
@@ -55,55 +53,6 @@ public:
 	int print_status() override;
 
 	bool init();
-	static void fillAmTestResultFromAction(am_test_result_s &result, hrt_abstime now, hrt_abstime timestamp_sample,
-					       hrt_abstime am_setpoint_timestamp, const RlToolsAdapter::Action &action,
-					       uint32_t degraded_flags = am_test_result_s::DEGRADED_NONE)
-	{
-		result = {};
-		result.timestamp = now;
-		result.timestamp_sample = timestamp_sample;
-		result.am_valid = true;
-		result.failure_flags = am_test_result_s::FAILURE_NONE;
-		result.degraded_flags = degraded_flags;
-		result.am_setpoint_timestamp = am_setpoint_timestamp;
-
-		for (int i = 0; i < kActionDim; ++i) {
-			const float motor_control = clampNormalizedMotorControl(action[i]);
-			result.am_raw_action[i] = action[i];
-			result.am_mapped_action[i] = motor_control;
-			result.am_motor_control[i] = motor_control;
-		}
-
-		for (int i = kActionDim; i < kMotorControlDim; ++i) {
-			result.am_motor_control[i] = NAN;
-		}
-	}
-
-	static void fillInvalidAmTestResult(am_test_result_s &result, hrt_abstime now, hrt_abstime timestamp_sample,
-					    hrt_abstime am_setpoint_timestamp, uint32_t failure_flags,
-					    uint32_t degraded_flags = am_test_result_s::DEGRADED_NONE)
-	{
-		result = {};
-		result.timestamp = now;
-		result.timestamp_sample = timestamp_sample;
-		result.am_valid = false;
-		result.failure_flags = failure_flags;
-		result.degraded_flags = degraded_flags;
-		result.am_setpoint_timestamp = am_setpoint_timestamp;
-
-		for (float &value : result.am_raw_action) {
-			value = NAN;
-		}
-
-		for (float &value : result.am_mapped_action) {
-			value = NAN;
-		}
-
-		for (float &value : result.am_motor_control) {
-			value = NAN;
-		}
-	}
-
 	struct PolicyObservationTiming {
 		hrt_abstime observation_build_timestamp{0};
 		hrt_abstime vehicle_local_position_timestamp{0};
@@ -114,11 +63,15 @@ public:
 		hrt_abstime vehicle_angular_velocity_timestamp_sample{0};
 		hrt_abstime arm_joint_state_timestamp{0};
 		hrt_abstime arm_joint_state_timestamp_sample{0};
+		uint32_t arm_joint_state_sequence{0};
 		hrt_abstime trajectory_setpoint_timestamp{0};
 		hrt_abstime offboard_control_mode_timestamp{0};
 		hrt_abstime policy_inference_start_timestamp{0};
 		hrt_abstime policy_inference_finish_timestamp{0};
 		uint32_t policy_sequence{0};
+		uint8_t takeoff_state{takeoff_status_s::TAKEOFF_STATE_UNINITIALIZED};
+		float takeoff_ramp_scale{1.0f};
+		float takeoff_ramped_speed_up{0.0f};
 	};
 
 	static void fillPolicyObservation(am_policy_observation_s &policy_observation,
@@ -139,14 +92,16 @@ public:
 		policy_observation.vehicle_angular_velocity_timestamp_sample = timing.vehicle_angular_velocity_timestamp_sample;
 		policy_observation.arm_joint_state_timestamp = timing.arm_joint_state_timestamp;
 		policy_observation.arm_joint_state_timestamp_sample = timing.arm_joint_state_timestamp_sample;
+		policy_observation.arm_joint_state_sequence = timing.arm_joint_state_sequence;
 		policy_observation.trajectory_setpoint_timestamp = timing.trajectory_setpoint_timestamp;
 		policy_observation.offboard_control_mode_timestamp = timing.offboard_control_mode_timestamp;
 		policy_observation.policy_inference_start_timestamp = timing.policy_inference_start_timestamp;
 		policy_observation.policy_inference_finish_timestamp = timing.policy_inference_finish_timestamp;
 		policy_observation.policy_sequence = timing.policy_sequence;
-		policy_observation.failure_flags = 0;
+		policy_observation.takeoff_state = timing.takeoff_state;
+		policy_observation.takeoff_ramp_scale = timing.takeoff_ramp_scale;
+		policy_observation.takeoff_ramped_speed_up = timing.takeoff_ramped_speed_up;
 		policy_observation.degraded_flags = degraded_flags;
-		policy_observation.am_setpoint_timestamp = timing.trajectory_setpoint_timestamp;
 
 		for (int i = 0; i < RlToolsAdapter::ObservationDim; ++i) {
 			policy_observation.observation[i] = observation[i];
@@ -155,10 +110,6 @@ public:
 		for (int i = 0; i < kActionDim; ++i) {
 			policy_observation.raw_action[i] = action[i];
 			policy_observation.mapped_action[i] = actuator_motors.control[i];
-		}
-
-		for (int i = 0; i < kMotorControlDim; ++i) {
-			policy_observation.motor_control[i] = actuator_motors.control[i];
 		}
 	}
 
@@ -176,49 +127,6 @@ public:
 		const bool heading_valid = PX4_ISFINITE(position.heading);
 
 		return xy_valid && z_valid && v_xy_valid && v_z_valid && heading_valid && attitude_valid && angular_velocity_valid;
-	}
-
-	static bool vehicleStateValidForAmTest(const vehicle_local_position_s &position, bool attitude_valid,
-					       bool angular_velocity_valid, hrt_abstime now, uint32_t &degraded_flags)
-	{
-		degraded_flags = am_test_result_s::DEGRADED_NONE;
-
-		if ((position.timestamp == 0) || (now > position.timestamp + kStateTimeout)) {
-			return false;
-		}
-
-		if (!position.xy_valid) {
-			degraded_flags |= am_test_result_s::DEGRADED_LOCAL_XY_INVALID;
-		}
-
-		if (!position.v_xy_valid) {
-			degraded_flags |= am_test_result_s::DEGRADED_LOCAL_VXY_INVALID;
-		}
-
-		const bool xy_values_finite = PX4_ISFINITE(position.x) && PX4_ISFINITE(position.y);
-		const bool z_valid = position.z_valid && PX4_ISFINITE(position.z);
-		const bool v_xy_values_finite = PX4_ISFINITE(position.vx) && PX4_ISFINITE(position.vy);
-		const bool v_z_valid = position.v_z_valid && PX4_ISFINITE(position.vz);
-		const bool heading_valid = PX4_ISFINITE(position.heading);
-
-		return xy_values_finite && z_valid && v_xy_values_finite && v_z_valid && heading_valid
-		       && attitude_valid && angular_velocity_valid;
-	}
-
-	static void fillDefaultAmTestSetpoint(trajectory_setpoint_s &setpoint, hrt_abstime now,
-					      const vehicle_local_position_s &position, uint32_t &degraded_flags)
-	{
-		setpoint = {};
-		setpoint.timestamp = now;
-		setpoint.position[0] = position.x;
-		setpoint.position[1] = position.y;
-		setpoint.position[2] = position.z;
-		setpoint.velocity[0] = 0.0f;
-		setpoint.velocity[1] = 0.0f;
-		setpoint.velocity[2] = 0.0f;
-		setpoint.yaw = position.heading;
-		setpoint.yawspeed = 0.0f;
-		degraded_flags |= am_test_result_s::DEGRADED_SETPOINT_DEFAULTED;
 	}
 
 	static void fillAmOffboardHoldSetpoint(trajectory_setpoint_s &setpoint, hrt_abstime now,
@@ -305,6 +213,45 @@ public:
 		return math::constrain(action, 0.0f, 1.0f);
 	}
 
+	static float takeoffRampOutputScale(uint8_t takeoff_state, float ramped_speed_up, float target_speed_up)
+	{
+		if (takeoff_state >= takeoff_status_s::TAKEOFF_STATE_FLIGHT) {
+			return 1.0f;
+		}
+
+		if (takeoff_state != takeoff_status_s::TAKEOFF_STATE_RAMPUP) {
+			return 0.0f;
+		}
+
+		if (!PX4_ISFINITE(ramped_speed_up) || !PX4_ISFINITE(target_speed_up) || target_speed_up <= FLT_EPSILON) {
+			return 0.0f;
+		}
+
+		return math::constrain(ramped_speed_up / target_speed_up, 0.0f, 1.0f);
+	}
+
+	static void fillMotorSetpointFromAction(actuator_motors_s &actuator_motors,
+						RlToolsAdapter::Action &executed_action,
+						const RlToolsAdapter::Action &action, hrt_abstime now,
+						hrt_abstime timestamp_sample, float output_scale)
+	{
+		actuator_motors = {};
+		actuator_motors.timestamp = now;
+		actuator_motors.timestamp_sample = timestamp_sample;
+		const float constrained_scale = PX4_ISFINITE(output_scale) ? math::constrain(output_scale, 0.0f, 1.0f) : 0.0f;
+
+		for (int i = 0; i < kActionDim; ++i) {
+			actuator_motors.control[i] = clampNormalizedMotorControl(action[i]) * constrained_scale;
+			executed_action[i] = actuator_motors.control[i];
+		}
+
+		for (int i = kActionDim; i < kMotorControlDim; ++i) {
+			actuator_motors.control[i] = NAN;
+		}
+
+		actuator_motors.reversible_flags = 0;
+	}
+
 	static float constrainUpwardVelocityNed(float velocity_z_ned, float ramped_speed_up)
 	{
 		if (!PX4_ISFINITE(velocity_z_ned)) {
@@ -364,8 +311,7 @@ public:
 	enum class ActiveMode : uint8_t {
 		None = 0,
 		Manual,
-		Offboard,
-		Test
+		Offboard
 	};
 
 	static bool manualYawRateActive(float yawspeed, bool was_yaw_active, hrt_abstime &release_start,
@@ -548,8 +494,7 @@ private:
 
 	void Run() override;
 	void updateTargets();
-	void updateTargets(bool use_default_am_test_setpoint);
-	void updateTargets(bool use_default_am_test_setpoint, bool respect_trajectory_yaw);
+	void updateTargets(bool respect_trajectory_yaw);
 	void buildObservation(RlToolsAdapter::Observation &observation);
 	void applyAction(const RlToolsAdapter::Observation &observation, const RlToolsAdapter::Action &action,
 			 RlToolsAdapter::Action &executed_action, ActiveMode mode, bool publish_outputs,
@@ -557,21 +502,18 @@ private:
 	void publishPolicyObservation(const RlToolsAdapter::Observation &observation, const RlToolsAdapter::Action &action,
 				      const actuator_motors_s &actuator_motors, uint32_t degraded_flags,
 				      const PolicyObservationTiming &timing);
-	void publishAmTestStatus(bool vehicle_state_valid, bool arm_state_valid, bool am_setpoint_valid, bool am_valid,
-				 uint32_t failure_flags, uint32_t degraded_flags);
-	void publishAmTestResult(uint32_t failure_flags, uint32_t degraded_flags);
-	void publishAmTestResult(const RlToolsAdapter::Action &action, uint32_t degraded_flags);
 	void publishStopSetpoint();
 	void publishIdleSetpoint();
 	void publishTakeoffStatus();
 	bool updateTakeoffGate(ActiveMode mode, bool was_using_am_mode, float dt_s);
 	void updateActionHistory(const RlToolsAdapter::Action &action);
 	void resetActionHistory();
-	void maybeLogPolicyDiagnostics(const RlToolsAdapter::Observation &observation, const RlToolsAdapter::Action &action);
+	void maybeLogPolicyDiagnostics(const RlToolsAdapter::Observation &observation, const RlToolsAdapter::Action &action,
+				       const RlToolsAdapter::Action &executed_action);
 	void publishStatus();
 	void resetCommandReference();
 	void resetState();
-	bool updateVehicleState(float &dt_s, bool allow_am_test_degraded, uint32_t &degraded_flags);
+	bool updateVehicleState(float &dt_s);
 	void updateConvertedState();
 	bool anyAxisActive(const bool axes[3]) const;
 	bool armStateValid() const;
@@ -603,8 +545,6 @@ private:
 	uORB::Publication<actuator_motors_s> _actuator_motors_pub{ORB_ID(actuator_motors)};
 	uORB::Publication<am_pos_control_status_s> _status_pub{ORB_ID(am_pos_control_status)};
 	uORB::Publication<am_policy_observation_s> _policy_observation_pub{ORB_ID(am_policy_observation)};
-	uORB::Publication<am_test_result_s> _am_test_result_pub{ORB_ID(am_test_result)};
-	uORB::Publication<am_test_status_s> _am_test_status_pub{ORB_ID(am_test_status)};
 	uORB::PublicationData<takeoff_status_s> _takeoff_status_pub{ORB_ID(takeoff_status)};
 	uORB::Publication<vehicle_thrust_setpoint_s> _vehicle_thrust_setpoint_pub{ORB_ID(vehicle_thrust_setpoint)};
 
@@ -639,6 +579,7 @@ private:
 	float _heading_w{0.0f};
 	float _prev_action[kActionDim] {0.f, 0.f, 0.f, 0.f};
 	float _takeoff_ramped_speed_up{0.0f};
+	float _takeoff_target_speed_up{0.0f};
 	hrt_abstime _manual_yaw_release_start{0};
 	int _startup_diag_samples_remaining{0};
 	uint32_t _policy_sequence{0};

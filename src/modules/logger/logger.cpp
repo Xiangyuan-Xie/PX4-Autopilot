@@ -142,10 +142,9 @@ namespace logger
 
 constexpr const char *Logger::LOG_ROOT[(int)LogType::Count];
 
-bool Logger::should_start_file_log(LogMode log_mode, bool arm_until_shutdown_latched, bool armed, uint8_t nav_state)
+bool Logger::should_start_file_log(LogMode log_mode, bool arm_until_shutdown_latched, bool armed, uint8_t)
 {
-	const bool am_test_mode = nav_state == vehicle_status_s::NAVIGATION_STATE_AM_TEST;
-	return armed || am_test_mode || (arm_until_shutdown_latched && log_mode == LogMode::arm_until_shutdown);
+	return armed || (arm_until_shutdown_latched && log_mode == LogMode::arm_until_shutdown);
 }
 
 bool Logger::arm_until_shutdown_latched_after_update(LogMode log_mode, bool arm_until_shutdown_latched, bool armed)

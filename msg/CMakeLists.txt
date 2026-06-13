@@ -46,8 +46,6 @@ set(msg_files
 	AdcReport.msg
 	AmPosControlStatus.msg
 	AmPolicyObservation.msg
-	AmTestResult.msg
-	AmTestStatus.msg
 	ArmJointState.msg
 	Airspeed.msg
 	AirspeedWind.msg

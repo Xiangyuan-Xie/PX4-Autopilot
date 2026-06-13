@@ -71,8 +71,3 @@ TEST(CommanderDisarmTest, DeniesRcDisarmInAirForPositionControlWhenManualDisarmE
 {
 	EXPECT_FALSE(canDisarmInAir(vehicle_status_s::NAVIGATION_STATE_POSCTL, arm_disarm_reason_t::rc_switch, true));
 }
-
-TEST(CommanderDisarmTest, DeniesRcDisarmInAirForAmTestWhenManualDisarmEnabled)
-{
-	EXPECT_FALSE(canDisarmInAir(vehicle_status_s::NAVIGATION_STATE_AM_TEST, arm_disarm_reason_t::rc_switch, true));
-}

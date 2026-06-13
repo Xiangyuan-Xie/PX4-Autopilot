@@ -10,13 +10,17 @@ uint64 vehicle_angular_velocity_timestamp
 uint64 vehicle_angular_velocity_timestamp_sample
 uint64 arm_joint_state_timestamp
 uint64 arm_joint_state_timestamp_sample
+uint32 arm_joint_state_sequence
 uint64 trajectory_setpoint_timestamp
 uint64 offboard_control_mode_timestamp
 uint64 policy_inference_start_timestamp
 uint64 policy_inference_finish_timestamp
 uint32 policy_sequence
 
-uint32 failure_flags
+uint8 takeoff_state
+float32 takeoff_ramp_scale
+float32 takeoff_ramped_speed_up
+
 uint32 degraded_flags
 
 uint32 DEGRADED_NONE = 0
@@ -27,9 +31,5 @@ uint32 DEGRADED_SETPOINT_DEFAULTED = 4
 float32[30] observation
 float32[4] raw_action
 float32[4] mapped_action
-
-float32[12] motor_control
-
-uint64 am_setpoint_timestamp
 
 # TOPICS am_policy_observation
