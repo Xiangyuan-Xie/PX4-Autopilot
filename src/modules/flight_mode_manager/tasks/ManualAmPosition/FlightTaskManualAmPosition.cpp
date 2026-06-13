@@ -82,9 +82,7 @@ void FlightTaskManualAmPosition::_setDefaultConstraints()
 
 bool FlightTaskManualAmPosition::_checkTakeoff()
 {
-	const float deadzone = math::constrain(_param_ampc_man_dz.get(), 0.0f, 0.99f);
-	const float release = (_sticks.getThrottleZeroCentered() + 1.0f - deadzone) / (1.0f - deadzone);
-	return release > FLT_EPSILON;
+	return _sticks.getThrottleZeroCentered() > 0.3f;
 }
 
 void FlightTaskManualAmPosition::_ekfResetHandlerHeading(float delta_psi)

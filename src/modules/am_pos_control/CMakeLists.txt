@@ -48,6 +48,7 @@ px4_add_unit_gtest(
 px4_add_unit_gtest(
 	SRC am_pos_control_test.cpp
 	EXTRA_SRCS ../mc_pos_control/Takeoff/Takeoff.cpp
-	INCLUDES ${PX4_SOURCE_DIR}/src/modules/mc_pos_control/Takeoff
+	INCLUDES
+		${PX4_SOURCE_DIR}/src/modules/mc_pos_control/Takeoff
 	LINKLIBS am_pos_control_policy_blob hysteresis
 )

@@ -68,10 +68,10 @@ public:
 		result.am_setpoint_timestamp = am_setpoint_timestamp;
 
 		for (int i = 0; i < kActionDim; ++i) {
-			const float mapped = mapActionToMotor(action[i]);
+			const float motor_control = clampNormalizedMotorControl(action[i]);
 			result.am_raw_action[i] = action[i];
-			result.am_mapped_action[i] = mapped;
-			result.am_motor_control[i] = mapped;
+			result.am_mapped_action[i] = motor_control;
+			result.am_motor_control[i] = motor_control;
 		}
 
 		for (int i = kActionDim; i < kMotorControlDim; ++i) {
@@ -300,20 +300,9 @@ public:
 		actuator_motors.reversible_flags = 0;
 	}
 
-	static float mapActionToMotor(float action)
+	static float clampNormalizedMotorControl(float action)
 	{
 		return math::constrain(action, 0.0f, 1.0f);
-	}
-
-	static float inverseMappedMotorToAction(float motor_control)
-	{
-		return math::constrain(motor_control, 0.0f, 1.0f);
-	}
-
-	static bool manualThrottleWantsTakeoff(float throttle_zero_centered, float deadzone)
-	{
-		deadzone = math::constrain(deadzone, 0.0f, 0.99f);
-		return throttle_zero_centered > -1.0f + deadzone;
 	}
 
 	static float constrainUpwardVelocityNed(float velocity_z_ned, float ramped_speed_up)
@@ -659,16 +648,7 @@ private:
 	Sticks _sticks{this};
 
 	DEFINE_PARAMETERS(
-		(ParamFloat<px4::params::AMPC_VEL_MANUAL>) _param_ampc_vel_manual,
-		(ParamFloat<px4::params::AMPC_VEL_SIDE>) _param_ampc_vel_side,
-		(ParamFloat<px4::params::AMPC_VEL_BACK>) _param_ampc_vel_back,
 		(ParamFloat<px4::params::AMPC_Z_VEL_UP>) _param_ampc_z_vel_up,
-		(ParamFloat<px4::params::AMPC_Z_VEL_DN>) _param_ampc_z_vel_dn,
-		(ParamFloat<px4::params::AMPC_MAN_Y_MAX>) _param_ampc_man_y_max,
-		(ParamFloat<px4::params::AMPC_MAN_Y_TAU>) _param_ampc_man_y_tau,
-		(ParamFloat<px4::params::AMPC_MAN_DZ>) _param_ampc_man_dz,
-		(ParamFloat<px4::params::AMPC_HOLD_MAX_Z>) _param_ampc_hold_max_z,
-		(ParamFloat<px4::params::AMPC_HOLD_MAX_XY>) _param_ampc_hold_max_xy,
 		(ParamFloat<px4::params::COM_OF_LOSS_T>) _param_com_of_loss_t,
 		(ParamFloat<px4::params::COM_SPOOLUP_TIME>) _param_com_spoolup_time,
 		(ParamFloat<px4::params::MPC_TKO_RAMP_T>) _param_mpc_tko_ramp_t

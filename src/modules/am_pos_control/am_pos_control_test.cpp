@@ -23,7 +23,7 @@ vehicle_local_position_s validLocalPosition()
 }
 }
 
-TEST(AmPosControlTest, FillAmTestResultFromActionMapsMotorControls)
+TEST(AmPosControlTest, FillAmTestResultFromActionClampsNormalizedMotorControls)
 {
 	const hrt_abstime now = 123456;
 	const hrt_abstime sample = 123000;
@@ -446,17 +446,6 @@ TEST(AmPosControlTest, IdleMotorSetpointPublishesZeroThrustIntent)
 	EXPECT_FLOAT_EQ(thrust_setpoint.xyz[2], 0.0f);
 }
 
-TEST(AmPosControlTest, ManualThrottleOnlyTriggersTakeoffIntent)
-{
-	const float deadzone = 0.1f;
-
-	EXPECT_FALSE(AmPosControl::manualThrottleWantsTakeoff(-1.0f, deadzone));
-	EXPECT_FALSE(AmPosControl::manualThrottleWantsTakeoff(-0.9f, deadzone));
-	EXPECT_TRUE(AmPosControl::manualThrottleWantsTakeoff(-0.899f, deadzone));
-	EXPECT_TRUE(AmPosControl::manualThrottleWantsTakeoff(0.0f, deadzone));
-	EXPECT_TRUE(AmPosControl::manualThrottleWantsTakeoff(0.5f, deadzone));
-}
-
 TEST(AmPosControlTest, ConstrainUpwardVelocityNedLimitsOnlyUpwardDemand)
 {
 	EXPECT_FLOAT_EQ(AmPosControl::constrainUpwardVelocityNed(-2.0f, 0.5f), -0.5f);
@@ -814,13 +803,13 @@ TEST(AmPosControlTest, WorldYawRateOnlyActivatesYaw)
 	EXPECT_FALSE(AmPosControl::commandActive(0.0f));
 }
 
-TEST(AmPosControlTest, InverseMappedMotorToActionClampsNormalizedCommands)
+TEST(AmPosControlTest, ClampNormalizedMotorControlIsIdentityInsideActionRange)
 {
-	EXPECT_TRUE(std::isfinite(AmPosControl::inverseMappedMotorToAction(0.0f)));
-	EXPECT_TRUE(std::isfinite(AmPosControl::inverseMappedMotorToAction(1.0f)));
-	EXPECT_FLOAT_EQ(AmPosControl::inverseMappedMotorToAction(-0.25f), 0.0f);
-	EXPECT_FLOAT_EQ(AmPosControl::inverseMappedMotorToAction(0.5f), 0.5f);
-	EXPECT_FLOAT_EQ(AmPosControl::inverseMappedMotorToAction(1.25f), 1.0f);
+	EXPECT_TRUE(std::isfinite(AmPosControl::clampNormalizedMotorControl(0.0f)));
+	EXPECT_TRUE(std::isfinite(AmPosControl::clampNormalizedMotorControl(1.0f)));
+	EXPECT_FLOAT_EQ(AmPosControl::clampNormalizedMotorControl(-0.25f), 0.0f);
+	EXPECT_FLOAT_EQ(AmPosControl::clampNormalizedMotorControl(0.5f), 0.5f);
+	EXPECT_FLOAT_EQ(AmPosControl::clampNormalizedMotorControl(1.25f), 1.0f);
 }
 
 TEST(AmPosControlTest, PolicyStateCommitsOncePolicyOutputCanDriveMotors)

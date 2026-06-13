@@ -146,11 +146,6 @@ bool AmPosControl::updateTakeoffGate(ActiveMode mode, bool was_using_am_mode, fl
 	float speed_up = PX4_ISFINITE(_vehicle_constraints.speed_up) ? _vehicle_constraints.speed_up :
 			 _param_ampc_z_vel_up.get();
 
-	if (mode == ActiveMode::Manual) {
-		_sticks.checkAndUpdateStickInputs();
-		want_takeoff = manualThrottleWantsTakeoff(_sticks.getThrottleZeroCentered(), _param_ampc_man_dz.get());
-	}
-
 	if (mode == ActiveMode::Offboard) {
 		want_takeoff = offboardSetpointWantsTakeoff(_trajectory_setpoint, _position, _position.timestamp_sample);
 		speed_up = _param_ampc_z_vel_up.get();
@@ -560,20 +555,20 @@ void AmPosControl::maybeLogPolicyDiagnostics(const RlToolsAdapter::Observation &
 	const char *mode_label = mode == ActiveMode::Offboard ? "AM Offboard" :
 				 mode == ActiveMode::Test ? "AM Test" : "AM Position";
 
-	float mapped_action[kActionDim] {};
-	float mapped_sum = 0.0f;
-	float mapped_min = INFINITY;
-	float mapped_max = -INFINITY;
+	float motor_control[kActionDim] {};
+	float motor_sum = 0.0f;
+	float motor_min = INFINITY;
+	float motor_max = -INFINITY;
 
 	for (int i = 0; i < kActionDim; ++i) {
-		mapped_action[i] = mapActionToMotor(action[i]);
-		mapped_sum += mapped_action[i];
-		mapped_min = math::min(mapped_min, mapped_action[i]);
-		mapped_max = math::max(mapped_max, mapped_action[i]);
+		motor_control[i] = clampNormalizedMotorControl(action[i]);
+		motor_sum += motor_control[i];
+		motor_min = math::min(motor_min, motor_control[i]);
+		motor_max = math::max(motor_max, motor_control[i]);
 	}
 
-	const float mapped_mean = mapped_sum / static_cast<float>(kActionDim);
-	const float mapped_spread = mapped_max - mapped_min;
+	const float motor_mean = motor_sum / static_cast<float>(kActionDim);
+	const float motor_spread = motor_max - motor_min;
 
 	PX4_INFO(
 		"%s obs pos_err=(%.3f, %.3f, %.3f) grav_z=%.3f prev_action=(%.3f, %.3f, %.3f, %.3f)",
@@ -581,18 +576,18 @@ void AmPosControl::maybeLogPolicyDiagnostics(const RlToolsAdapter::Observation &
 		(double)observation[0], (double)observation[1], (double)observation[2], (double)observation[14],
 		(double)observation[26], (double)observation[27], (double)observation[28], (double)observation[29]);
 	PX4_INFO(
-		"%s act raw=(%.3f, %.3f, %.3f, %.3f) mapped=(%.3f, %.3f, %.3f, %.3f) mean=%.3f spread=%.3f",
+		"%s act raw=(%.3f, %.3f, %.3f, %.3f) motor=(%.3f, %.3f, %.3f, %.3f) mean=%.3f spread=%.3f",
 		mode_label,
 		(double)action[0], (double)action[1], (double)action[2], (double)action[3],
-		(double)mapped_action[0], (double)mapped_action[1], (double)mapped_action[2], (double)mapped_action[3],
-		(double)mapped_mean, (double)mapped_spread);
+		(double)motor_control[0], (double)motor_control[1], (double)motor_control[2], (double)motor_control[3],
+		(double)motor_mean, (double)motor_spread);
 
-	if (mapped_mean < kDiagLowMeanCommand
-	    || (mapped_min < kDiagLowMinCommand && mapped_spread > kDiagWideSpread)) {
+	if (motor_mean < kDiagLowMeanCommand
+	    || (motor_min < kDiagLowMinCommand && motor_spread > kDiagWideSpread)) {
 		PX4_WARN(
-			"%s action distribution looks weak/imbalanced: mean=%.3f min=%.3f max=%.3f",
+			"%s motor command distribution looks weak/imbalanced: mean=%.3f min=%.3f max=%.3f",
 			mode_label,
-			(double)mapped_mean, (double)mapped_min, (double)mapped_max);
+			(double)motor_mean, (double)motor_min, (double)motor_max);
 	}
 
 	--_startup_diag_samples_remaining;
@@ -633,7 +628,7 @@ void AmPosControl::applyAction(const RlToolsAdapter::Observation &observation, c
 	actuator_motors.timestamp_sample = actuator_motors.timestamp;
 
 	for (int i = 0; i < kActionDim; ++i) {
-		actuator_motors.control[i] = mapActionToMotor(action[i]);
+		actuator_motors.control[i] = clampNormalizedMotorControl(action[i]);
 		executed_action[i] = action[i];
 	}
 
