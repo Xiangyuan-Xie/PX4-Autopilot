@@ -64,6 +64,7 @@ public:
 		hrt_abstime arm_joint_state_timestamp{0};
 		hrt_abstime arm_joint_state_timestamp_sample{0};
 		uint32_t arm_joint_state_sequence{0};
+		uint32_t arm_joint_state_position_wrap_mask{0};
 		hrt_abstime trajectory_setpoint_timestamp{0};
 		hrt_abstime offboard_control_mode_timestamp{0};
 		hrt_abstime policy_inference_start_timestamp{0};
@@ -93,6 +94,7 @@ public:
 		policy_observation.arm_joint_state_timestamp = timing.arm_joint_state_timestamp;
 		policy_observation.arm_joint_state_timestamp_sample = timing.arm_joint_state_timestamp_sample;
 		policy_observation.arm_joint_state_sequence = timing.arm_joint_state_sequence;
+		policy_observation.arm_joint_state_position_wrap_mask = timing.arm_joint_state_position_wrap_mask;
 		policy_observation.trajectory_setpoint_timestamp = timing.trajectory_setpoint_timestamp;
 		policy_observation.offboard_control_mode_timestamp = timing.offboard_control_mode_timestamp;
 		policy_observation.policy_inference_start_timestamp = timing.policy_inference_start_timestamp;
@@ -111,6 +113,31 @@ public:
 			policy_observation.raw_action[i] = action[i];
 			policy_observation.mapped_action[i] = actuator_motors.control[i];
 		}
+	}
+
+	static float wrapArmJointPositionForPolicy(float joint_position, uint32_t &wrap_mask, int joint_index)
+	{
+		if (!PX4_ISFINITE(joint_position)) {
+			return joint_position;
+		}
+
+		if (joint_index == 4) {
+			constexpr float kJoint5OpenAngleRad = 1.723f;
+			return math::constrain(-joint_position / kJoint5OpenAngleRad, 0.0f, 1.0f);
+		}
+
+		if (joint_position > M_PI_F || joint_position < -M_PI_F) {
+			wrap_mask |= 1u << joint_index;
+			joint_position = fmodf(joint_position, 2.f * M_PI_F);
+
+			if (joint_position > M_PI_F) {
+				joint_position -= 2.f * M_PI_F;
+			} else if (joint_position < -M_PI_F) {
+				joint_position += 2.f * M_PI_F;
+			}
+		}
+
+		return joint_position;
 	}
 
 	static bool vehicleStateValidStrict(const vehicle_local_position_s &position, bool attitude_valid,
@@ -233,16 +260,16 @@ public:
 	static void fillMotorSetpointFromAction(actuator_motors_s &actuator_motors,
 						RlToolsAdapter::Action &executed_action,
 						const RlToolsAdapter::Action &action, hrt_abstime now,
-						hrt_abstime timestamp_sample, float output_scale)
+						hrt_abstime timestamp_sample)
 	{
 		actuator_motors = {};
 		actuator_motors.timestamp = now;
 		actuator_motors.timestamp_sample = timestamp_sample;
-		const float constrained_scale = PX4_ISFINITE(output_scale) ? math::constrain(output_scale, 0.0f, 1.0f) : 0.0f;
 
 		for (int i = 0; i < kActionDim; ++i) {
-			actuator_motors.control[i] = clampNormalizedMotorControl(action[i]) * constrained_scale;
-			executed_action[i] = actuator_motors.control[i];
+			const float clamped_action = clampNormalizedMotorControl(action[i]);
+			actuator_motors.control[i] = clamped_action;
+			executed_action[i] = clamped_action;
 		}
 
 		for (int i = kActionDim; i < kMotorControlDim; ++i) {
@@ -515,6 +542,7 @@ private:
 	void resetState();
 	bool updateVehicleState(float &dt_s);
 	void updateConvertedState();
+	void updateNormalizedArmJointState();
 	bool anyAxisActive(const bool axes[3]) const;
 	bool armStateValid() const;
 	bool vehicleStateValid() const;
@@ -578,11 +606,13 @@ private:
 	matrix::Vector3f _root_ang_vel_b{};
 	float _heading_w{0.0f};
 	float _prev_action[kActionDim] {0.f, 0.f, 0.f, 0.f};
+	float _normalized_arm_position[kArmJointDim] {};
 	float _takeoff_ramped_speed_up{0.0f};
 	float _takeoff_target_speed_up{0.0f};
 	hrt_abstime _manual_yaw_release_start{0};
 	int _startup_diag_samples_remaining{0};
 	uint32_t _policy_sequence{0};
+	uint32_t _arm_joint_state_position_wrap_mask{0};
 
 	RlToolsAdapter _adapter{};
 	TakeoffHandling _takeoff{};

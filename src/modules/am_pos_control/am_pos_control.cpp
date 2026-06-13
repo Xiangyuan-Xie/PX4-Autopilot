@@ -116,6 +116,12 @@ void AmPosControl::resetState()
 	_root_lin_vel_b.zero();
 	_root_ang_vel_b.zero();
 	_heading_w = 0.0f;
+
+	for (float &arm_position : _normalized_arm_position) {
+		arm_position = 0.0f;
+	}
+
+	_arm_joint_state_position_wrap_mask = 0;
 	_takeoff_ramped_speed_up = 0.0f;
 	_takeoff_target_speed_up = 0.0f;
 	_manual_yaw_release_start = 0;
@@ -239,6 +245,16 @@ bool AmPosControl::armStateValid() const
 	}
 
 	return true;
+}
+
+void AmPosControl::updateNormalizedArmJointState()
+{
+	_arm_joint_state_position_wrap_mask = 0;
+
+	for (int i = 0; i < kArmJointDim; ++i) {
+		_normalized_arm_position[i] = wrapArmJointPositionForPolicy(_arm_joint_state.arm_position[i],
+					     _arm_joint_state_position_wrap_mask, i);
+	}
 }
 
 bool AmPosControl::trajectorySetpointValid() const
@@ -494,7 +510,7 @@ void AmPosControl::buildObservation(RlToolsAdapter::Observation &observation)
 	observation[idx++] = ang_vel_err_b(2);
 
 	for (int i = 0; i < kArmJointDim; ++i) {
-		observation[idx++] = _arm_joint_state.arm_position[i];
+		observation[idx++] = _normalized_arm_position[i];
 	}
 
 	for (int i = 0; i < kActionDim; ++i) {
@@ -579,7 +595,7 @@ void AmPosControl::applyAction(const RlToolsAdapter::Observation &observation, c
 {
 	actuator_motors_s actuator_motors{};
 	const hrt_abstime now = hrt_absolute_time();
-	fillMotorSetpointFromAction(actuator_motors, executed_action, action, now, now, timing.takeoff_ramp_scale);
+	fillMotorSetpointFromAction(actuator_motors, executed_action, action, now, now);
 	publishPolicyObservation(observation, action, actuator_motors, degraded_flags, timing);
 
 	if (publish_outputs) {
@@ -687,6 +703,7 @@ void AmPosControl::Run()
 
 	if (!vehicle_state_updated) {
 		_adapter.reset();
+		resetActionHistory();
 		resetCommandReference();
 		publishStopSetpoint();
 		perf_end(_loop_perf);
@@ -695,11 +712,14 @@ void AmPosControl::Run()
 
 	if (!armStateValid()) {
 		_adapter.reset();
+		resetActionHistory();
 		resetCommandReference();
 		publishStopSetpoint();
 		perf_end(_loop_perf);
 		return;
 	}
+
+	updateNormalizedArmJointState();
 
 	_trajectory_setpoint_sub.update(&_trajectory_setpoint);
 	_offboard_control_mode_sub.update(&_offboard_control_mode);
@@ -729,6 +749,7 @@ void AmPosControl::Run()
 		}
 
 		_adapter.reset();
+		resetActionHistory();
 		resetCommandReference();
 		publishStopSetpoint();
 		perf_end(_loop_perf);
@@ -765,6 +786,7 @@ void AmPosControl::Run()
 	policy_timing.arm_joint_state_timestamp = _arm_joint_state.timestamp;
 	policy_timing.arm_joint_state_timestamp_sample = _arm_joint_state.timestamp_sample;
 	policy_timing.arm_joint_state_sequence = _arm_joint_state.sequence;
+	policy_timing.arm_joint_state_position_wrap_mask = _arm_joint_state_position_wrap_mask;
 	policy_timing.trajectory_setpoint_timestamp = _trajectory_setpoint.timestamp;
 	policy_timing.offboard_control_mode_timestamp = _offboard_control_mode.timestamp;
 	buildObservation(observation);
@@ -795,6 +817,7 @@ void AmPosControl::Run()
 		}
 
 	} else {
+		_adapter.reset();
 		publishStopSetpoint();
 		resetCommandReference();
 		resetActionHistory();

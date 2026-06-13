@@ -55,6 +55,7 @@ TEST(AmPosControlTest, FillPolicyObservationIncludesSourceTiming)
 	timing.arm_joint_state_timestamp = 7310;
 	timing.arm_joint_state_timestamp_sample = 7300;
 	timing.arm_joint_state_sequence = 77;
+	timing.arm_joint_state_position_wrap_mask = 0b10101;
 	timing.trajectory_setpoint_timestamp = 7400;
 	timing.offboard_control_mode_timestamp = 7500;
 	timing.policy_inference_start_timestamp = 8100;
@@ -81,6 +82,7 @@ TEST(AmPosControlTest, FillPolicyObservationIncludesSourceTiming)
 	EXPECT_EQ(policy_observation.arm_joint_state_timestamp, timing.arm_joint_state_timestamp);
 	EXPECT_EQ(policy_observation.arm_joint_state_timestamp_sample, timing.arm_joint_state_timestamp_sample);
 	EXPECT_EQ(policy_observation.arm_joint_state_sequence, timing.arm_joint_state_sequence);
+	EXPECT_EQ(policy_observation.arm_joint_state_position_wrap_mask, timing.arm_joint_state_position_wrap_mask);
 	EXPECT_EQ(policy_observation.trajectory_setpoint_timestamp, timing.trajectory_setpoint_timestamp);
 	EXPECT_EQ(policy_observation.offboard_control_mode_timestamp, timing.offboard_control_mode_timestamp);
 	EXPECT_EQ(policy_observation.policy_inference_start_timestamp, timing.policy_inference_start_timestamp);
@@ -98,6 +100,63 @@ TEST(AmPosControlTest, FillPolicyObservationIncludesSourceTiming)
 		EXPECT_FLOAT_EQ(policy_observation.raw_action[i], action[i]);
 		EXPECT_FLOAT_EQ(policy_observation.mapped_action[i], actuator_motors.control[i]);
 	}
+}
+
+TEST(AmPosControlTest, WrapArmJointPositionKeepsPiBoundaries)
+{
+	uint32_t wrap_mask = 0;
+
+	EXPECT_FLOAT_EQ(AmPosControl::wrapArmJointPositionForPolicy(0.0f, wrap_mask, 0), 0.0f);
+	EXPECT_FLOAT_EQ(AmPosControl::wrapArmJointPositionForPolicy(M_PI_F, wrap_mask, 1), M_PI_F);
+	EXPECT_FLOAT_EQ(AmPosControl::wrapArmJointPositionForPolicy(-M_PI_F, wrap_mask, 2), -M_PI_F);
+	EXPECT_EQ(wrap_mask, 0u);
+}
+
+TEST(AmPosControlTest, WrapArmJointPositionNormalizesFiniteOutOfRangeAngles)
+{
+	uint32_t wrap_mask = 0;
+
+	EXPECT_NEAR(AmPosControl::wrapArmJointPositionForPolicy(M_PI_F + 0.2f, wrap_mask, 0),
+		    -M_PI_F + 0.2f, 1e-6f);
+	EXPECT_NEAR(AmPosControl::wrapArmJointPositionForPolicy(-M_PI_F - 0.3f, wrap_mask, 2),
+		    M_PI_F - 0.3f, 1e-6f);
+	const float wrapped_multi_turn = AmPosControl::wrapArmJointPositionForPolicy(5.0f * M_PI_F, wrap_mask, 3);
+	EXPECT_LE(wrapped_multi_turn, M_PI_F);
+	EXPECT_GE(wrapped_multi_turn, -M_PI_F);
+	EXPECT_EQ(wrap_mask, (1u << 0) | (1u << 2) | (1u << 3));
+}
+
+TEST(AmPosControlTest, WrapArmJointPositionConvertsJoint5PhysicalAngleToOpening)
+{
+	uint32_t wrap_mask = 0;
+
+	EXPECT_FLOAT_EQ(AmPosControl::wrapArmJointPositionForPolicy(0.0f, wrap_mask, 4), 0.0f);
+	EXPECT_NEAR(AmPosControl::wrapArmJointPositionForPolicy(-0.8615f, wrap_mask, 4), 0.5f, 1e-6f);
+	EXPECT_FLOAT_EQ(AmPosControl::wrapArmJointPositionForPolicy(-1.723f, wrap_mask, 4), 1.0f);
+	EXPECT_FLOAT_EQ(AmPosControl::wrapArmJointPositionForPolicy(1.0f, wrap_mask, 4), 0.0f);
+	EXPECT_FLOAT_EQ(AmPosControl::wrapArmJointPositionForPolicy(-2.0f, wrap_mask, 4), 1.0f);
+	EXPECT_EQ(wrap_mask, 0u);
+}
+
+TEST(AmPosControlTest, WrapArmJointPositionHandlesLargeFiniteInput)
+{
+	uint32_t wrap_mask = 0;
+	const float wrapped = AmPosControl::wrapArmJointPositionForPolicy(1.0e20f, wrap_mask, 3);
+
+	EXPECT_TRUE(PX4_ISFINITE(wrapped));
+	EXPECT_LE(wrapped, M_PI_F);
+	EXPECT_GE(wrapped, -M_PI_F);
+	EXPECT_EQ(wrap_mask, 1u << 3);
+}
+
+TEST(AmPosControlTest, WrapArmJointPositionDoesNotHideNonFiniteInput)
+{
+	uint32_t wrap_mask = 0;
+
+	EXPECT_FALSE(PX4_ISFINITE(AmPosControl::wrapArmJointPositionForPolicy(NAN, wrap_mask, 0)));
+	EXPECT_FALSE(PX4_ISFINITE(AmPosControl::wrapArmJointPositionForPolicy(INFINITY, wrap_mask, 1)));
+	EXPECT_FALSE(PX4_ISFINITE(AmPosControl::wrapArmJointPositionForPolicy(-INFINITY, wrap_mask, 2)));
+	EXPECT_EQ(wrap_mask, 0u);
 }
 
 TEST(AmPosControlTest, ArmJointStateCarriesSampleTimestampAndSequence)
@@ -681,7 +740,7 @@ TEST(AmPosControlTest, ClampNormalizedMotorControlIsIdentityInsideActionRange)
 	EXPECT_FLOAT_EQ(AmPosControl::clampNormalizedMotorControl(1.25f), 1.0f);
 }
 
-TEST(AmPosControlTest, TakeoffRampOutputScaleGatesUntilRampupAndReachesFullScaleInFlight)
+TEST(AmPosControlTest, TakeoffRampScaleIsDiagnosticOnly)
 {
 	EXPECT_FLOAT_EQ(AmPosControl::takeoffRampOutputScale(takeoff_status_s::TAKEOFF_STATE_SPOOLUP, 0.5f, 1.0f), 0.0f);
 	EXPECT_FLOAT_EQ(AmPosControl::takeoffRampOutputScale(takeoff_status_s::TAKEOFF_STATE_READY_FOR_TAKEOFF, 0.5f,
@@ -695,21 +754,21 @@ TEST(AmPosControlTest, TakeoffRampOutputScaleGatesUntilRampupAndReachesFullScale
 	EXPECT_FLOAT_EQ(AmPosControl::takeoffRampOutputScale(takeoff_status_s::TAKEOFF_STATE_FLIGHT, 0.0f, 1.0f), 1.0f);
 }
 
-TEST(AmPosControlTest, MotorSetpointFromActionUsesTakeoffRampScaleForExecutedOutput)
+TEST(AmPosControlTest, MotorSetpointFromActionClampsRawActionWithoutRampScaling)
 {
 	const RlToolsAdapter::Action action{-0.5f, 0.5f, 1.5f, 0.25f};
 	RlToolsAdapter::Action executed_action{};
 	actuator_motors_s actuator_motors{};
 
-	AmPosControl::fillMotorSetpointFromAction(actuator_motors, executed_action, action, 2000, 1500, 0.4f);
+	AmPosControl::fillMotorSetpointFromAction(actuator_motors, executed_action, action, 2000, 1500);
 
 	EXPECT_EQ(actuator_motors.timestamp, 2000);
 	EXPECT_EQ(actuator_motors.timestamp_sample, 1500);
 	EXPECT_EQ(actuator_motors.reversible_flags, 0u);
 	EXPECT_FLOAT_EQ(actuator_motors.control[0], 0.0f);
-	EXPECT_FLOAT_EQ(actuator_motors.control[1], 0.2f);
-	EXPECT_FLOAT_EQ(actuator_motors.control[2], 0.4f);
-	EXPECT_FLOAT_EQ(actuator_motors.control[3], 0.1f);
+	EXPECT_FLOAT_EQ(actuator_motors.control[1], 0.5f);
+	EXPECT_FLOAT_EQ(actuator_motors.control[2], 1.0f);
+	EXPECT_FLOAT_EQ(actuator_motors.control[3], 0.25f);
 
 	for (int i = 0; i < 4; ++i) {
 		EXPECT_FLOAT_EQ(executed_action[i], actuator_motors.control[i]);
