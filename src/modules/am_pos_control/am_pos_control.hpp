@@ -37,7 +37,7 @@
 
 #include <Takeoff.hpp>
 
-#include "rl_tools_adapter.hpp"
+#include "am_policy_adapter.hpp"
 
 using namespace time_literals;
 
@@ -76,8 +76,8 @@ public:
 	};
 
 	static void fillPolicyObservation(am_policy_observation_s &policy_observation,
-					  const RlToolsAdapter::Observation &observation,
-					  const RlToolsAdapter::Action &action,
+					  const AmPolicyAdapter::Observation &observation,
+					  const AmPolicyAdapter::Action &action,
 					  const actuator_motors_s &actuator_motors, uint32_t degraded_flags,
 					  const PolicyObservationTiming &timing)
 	{
@@ -105,7 +105,7 @@ public:
 		policy_observation.takeoff_ramped_speed_up = timing.takeoff_ramped_speed_up;
 		policy_observation.degraded_flags = degraded_flags;
 
-		for (int i = 0; i < RlToolsAdapter::ObservationDim; ++i) {
+		for (int i = 0; i < AmPolicyAdapter::ObservationDim; ++i) {
 			policy_observation.observation[i] = observation[i];
 		}
 
@@ -258,8 +258,8 @@ public:
 	}
 
 	static void fillMotorSetpointFromAction(actuator_motors_s &actuator_motors,
-						RlToolsAdapter::Action &executed_action,
-						const RlToolsAdapter::Action &action, hrt_abstime now,
+						AmPolicyAdapter::Action &executed_action,
+						const AmPolicyAdapter::Action &action, hrt_abstime now,
 						hrt_abstime timestamp_sample)
 	{
 		actuator_motors = {};
@@ -522,21 +522,21 @@ private:
 	void Run() override;
 	void updateTargets();
 	void updateTargets(bool respect_trajectory_yaw);
-	void buildObservation(RlToolsAdapter::Observation &observation);
-	void applyAction(const RlToolsAdapter::Observation &observation, const RlToolsAdapter::Action &action,
-			 RlToolsAdapter::Action &executed_action, ActiveMode mode, bool publish_outputs,
+	void buildObservation(AmPolicyAdapter::Observation &observation);
+	void applyAction(const AmPolicyAdapter::Observation &observation, const AmPolicyAdapter::Action &action,
+			 AmPolicyAdapter::Action &executed_action, ActiveMode mode, bool publish_outputs,
 			 uint32_t degraded_flags, const PolicyObservationTiming &timing);
-	void publishPolicyObservation(const RlToolsAdapter::Observation &observation, const RlToolsAdapter::Action &action,
+	void publishPolicyObservation(const AmPolicyAdapter::Observation &observation, const AmPolicyAdapter::Action &action,
 				      const actuator_motors_s &actuator_motors, uint32_t degraded_flags,
 				      const PolicyObservationTiming &timing);
 	void publishStopSetpoint();
 	void publishIdleSetpoint();
 	void publishTakeoffStatus();
 	bool updateTakeoffGate(ActiveMode mode, bool was_using_am_mode, float dt_s);
-	void updateActionHistory(const RlToolsAdapter::Action &action);
+	void updateActionHistory(const AmPolicyAdapter::Action &action);
 	void resetActionHistory();
-	void maybeLogPolicyDiagnostics(const RlToolsAdapter::Observation &observation, const RlToolsAdapter::Action &action,
-				       const RlToolsAdapter::Action &executed_action);
+	void maybeLogPolicyDiagnostics(const AmPolicyAdapter::Observation &observation, const AmPolicyAdapter::Action &action,
+				       const AmPolicyAdapter::Action &executed_action);
 	void publishStatus();
 	void resetCommandReference();
 	void resetState();
@@ -614,7 +614,7 @@ private:
 	uint32_t _policy_sequence{0};
 	uint32_t _arm_joint_state_position_wrap_mask{0};
 
-	RlToolsAdapter _adapter{};
+	AmPolicyAdapter _adapter{};
 	TakeoffHandling _takeoff{};
 	Sticks _sticks{this};
 

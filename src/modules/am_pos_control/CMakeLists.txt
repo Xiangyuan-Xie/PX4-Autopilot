@@ -17,6 +17,11 @@ px4_add_module(
 		am_pos_control.cpp
 		am_pos_control.hpp
 		../mc_pos_control/Takeoff/Takeoff.cpp
+		am_policy_adapter.cpp
+		am_policy_adapter.hpp
+		dreamer_adapter.cpp
+		dreamer_adapter.hpp
+		policy_types.hpp
 		rl_tools_adapter.cpp
 		rl_tools_adapter.hpp
 	DEPENDS
@@ -42,7 +47,7 @@ target_compile_options(am_pos_control_policy_blob INTERFACE -Wno-unused-local-ty
 
 px4_add_unit_gtest(
 	SRC am_pos_control_policy_blob_test.cpp
-	EXTRA_SRCS rl_tools_adapter.cpp
+	EXTRA_SRCS am_policy_adapter.cpp dreamer_adapter.cpp rl_tools_adapter.cpp
 	LINKLIBS am_pos_control_policy_blob
 )
 px4_add_unit_gtest(

@@ -10,7 +10,7 @@
 #include <rl_tools/containers/tensor/tensor.h>
 
 #include "blob/policy.h"
-#include "rl_tools_adapter.hpp"
+#include "am_policy_adapter.hpp"
 
 namespace
 {
@@ -33,8 +33,10 @@ using OutputTensor = rlt::Tensor<rlt::tensor::Specification<float, Index, Output
 
 static_assert(kObservationDim == 30, "Exported policy observation dim mismatch");
 static_assert(kActionDim == 4, "Exported policy action dim mismatch");
-static_assert(RlToolsAdapter::ObservationDim == kObservationDim, "Adapter observation dim mismatch");
-static_assert(RlToolsAdapter::ActionDim == kActionDim, "Adapter action dim mismatch");
+static_assert(RlToolsAdapter::ObservationDim == kObservationDim, "rl_tools backend observation dim mismatch");
+static_assert(RlToolsAdapter::ActionDim == kActionDim, "rl_tools backend action dim mismatch");
+static_assert(AmPolicyAdapter::ObservationDim == kObservationDim, "Facade observation dim mismatch");
+static_assert(AmPolicyAdapter::ActionDim == kActionDim, "Facade action dim mismatch");
 
 using ObservationArray = std::array<float, kObservationDim>;
 using ActionArray = std::array<float, kActionDim>;
@@ -94,10 +96,10 @@ ActionArray evaluateSingleStep(const ObservationArray &observation)
 	return result;
 }
 
-ActionArray inferWithAdapter(RlToolsAdapter &adapter, uint64_t now_us, const ObservationArray &observation)
+ActionArray inferWithAdapter(AmPolicyAdapter &adapter, uint64_t now_us, const ObservationArray &observation)
 {
-	RlToolsAdapter::Observation adapter_observation{};
-	RlToolsAdapter::Action adapter_action{};
+	AmPolicyAdapter::Observation adapter_observation{};
+	AmPolicyAdapter::Action adapter_action{};
 
 	for (int i = 0; i < kObservationDim; ++i) {
 		adapter_observation[i] = observation[i];
@@ -126,17 +128,17 @@ TEST(AmPosControlPolicyBlobTest, ExampleObservationMatchesExportedReferenceOutpu
 	expectActionNear(evaluateSingleStep(exportedExampleObservation()), exportedExampleOutput());
 }
 
-TEST(AmPosControlPolicyBlobTest, AdapterFirstInferenceMatchesExportedReferenceOutput)
+TEST(AmPosControlPolicyBlobTest, FacadeFirstInferenceMatchesExportedReferenceOutput)
 {
-	RlToolsAdapter adapter{};
+	AmPolicyAdapter adapter{};
 	ASSERT_TRUE(adapter.init());
 
 	expectActionNear(inferWithAdapter(adapter, 1000, exportedExampleObservation()), exportedExampleOutput());
 }
 
-TEST(AmPosControlPolicyBlobTest, AdapterResetRestoresInitialHiddenState)
+TEST(AmPosControlPolicyBlobTest, FacadeResetRestoresInitialHiddenState)
 {
-	RlToolsAdapter adapter{};
+	AmPolicyAdapter adapter{};
 	ASSERT_TRUE(adapter.init());
 
 	(void)inferWithAdapter(adapter, 1000, exportedExampleObservation());
@@ -147,9 +149,9 @@ TEST(AmPosControlPolicyBlobTest, AdapterResetRestoresInitialHiddenState)
 	expectActionNear(inferWithAdapter(adapter, 21000, exportedExampleObservation()), exportedExampleOutput());
 }
 
-TEST(AmPosControlPolicyBlobTest, AdapterReusesCommittedActionBetweenNativeSteps)
+TEST(AmPosControlPolicyBlobTest, FacadeReusesCommittedActionBetweenNativeSteps)
 {
-	RlToolsAdapter adapter{};
+	AmPolicyAdapter adapter{};
 	ASSERT_TRUE(adapter.init());
 
 	const ObservationArray first_observation = exportedExampleObservation();

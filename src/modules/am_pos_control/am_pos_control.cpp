@@ -462,9 +462,9 @@ void AmPosControl::updateTargets(bool respect_trajectory_yaw)
 	_current_cmd_ref.has_ang_vel_cmd = yaw_active;
 }
 
-void AmPosControl::buildObservation(RlToolsAdapter::Observation &observation)
+void AmPosControl::buildObservation(AmPolicyAdapter::Observation &observation)
 {
-	for (int i = 0; i < RlToolsAdapter::ObservationDim; ++i) {
+	for (int i = 0; i < AmPolicyAdapter::ObservationDim; ++i) {
 		observation[i] = 0.0f;
 	}
 
@@ -518,7 +518,7 @@ void AmPosControl::buildObservation(RlToolsAdapter::Observation &observation)
 	}
 }
 
-void AmPosControl::updateActionHistory(const RlToolsAdapter::Action &action)
+void AmPosControl::updateActionHistory(const AmPolicyAdapter::Action &action)
 {
 	for (int i = 0; i < kActionDim; ++i) {
 		_prev_action[i] = action[i];
@@ -532,8 +532,8 @@ void AmPosControl::resetActionHistory()
 	}
 }
 
-void AmPosControl::maybeLogPolicyDiagnostics(const RlToolsAdapter::Observation &observation,
-		const RlToolsAdapter::Action &action, const RlToolsAdapter::Action &executed_action)
+void AmPosControl::maybeLogPolicyDiagnostics(const AmPolicyAdapter::Observation &observation,
+		const AmPolicyAdapter::Action &action, const AmPolicyAdapter::Action &executed_action)
 {
 	if (_startup_diag_samples_remaining <= 0) {
 		return;
@@ -580,8 +580,8 @@ void AmPosControl::maybeLogPolicyDiagnostics(const RlToolsAdapter::Observation &
 	--_startup_diag_samples_remaining;
 }
 
-void AmPosControl::publishPolicyObservation(const RlToolsAdapter::Observation &observation,
-		const RlToolsAdapter::Action &action, const actuator_motors_s &actuator_motors, uint32_t degraded_flags,
+void AmPosControl::publishPolicyObservation(const AmPolicyAdapter::Observation &observation,
+		const AmPolicyAdapter::Action &action, const actuator_motors_s &actuator_motors, uint32_t degraded_flags,
 		const PolicyObservationTiming &timing)
 {
 	am_policy_observation_s policy_observation{};
@@ -589,8 +589,8 @@ void AmPosControl::publishPolicyObservation(const RlToolsAdapter::Observation &o
 	_policy_observation_pub.publish(policy_observation);
 }
 
-void AmPosControl::applyAction(const RlToolsAdapter::Observation &observation, const RlToolsAdapter::Action &action,
-				       RlToolsAdapter::Action &executed_action, ActiveMode mode, bool publish_outputs,
+void AmPosControl::applyAction(const AmPolicyAdapter::Observation &observation, const AmPolicyAdapter::Action &action,
+				       AmPolicyAdapter::Action &executed_action, ActiveMode mode, bool publish_outputs,
 				       uint32_t degraded_flags, const PolicyObservationTiming &timing)
 {
 	actuator_motors_s actuator_motors{};
@@ -774,7 +774,7 @@ void AmPosControl::Run()
 		resetActionHistory();
 	}
 
-	RlToolsAdapter::Observation observation{};
+	AmPolicyAdapter::Observation observation{};
 	PolicyObservationTiming policy_timing{};
 	policy_timing.observation_build_timestamp = hrt_absolute_time();
 	policy_timing.vehicle_local_position_timestamp = _position.timestamp;
@@ -791,7 +791,7 @@ void AmPosControl::Run()
 	policy_timing.offboard_control_mode_timestamp = _offboard_control_mode.timestamp;
 	buildObservation(observation);
 
-	RlToolsAdapter::Action action{};
+	AmPolicyAdapter::Action action{};
 	policy_timing.policy_inference_start_timestamp = hrt_absolute_time();
 	const bool inference_ok = _adapter.infer(policy_timing.policy_inference_start_timestamp, observation, action);
 	policy_timing.policy_inference_finish_timestamp = hrt_absolute_time();
@@ -801,7 +801,7 @@ void AmPosControl::Run()
 					  _takeoff_target_speed_up);
 
 	if (inference_ok) {
-		RlToolsAdapter::Action executed_action{};
+		AmPolicyAdapter::Action executed_action{};
 		policy_timing.policy_sequence = ++_policy_sequence;
 		applyAction(observation, action, executed_action, mode, true, am_policy_degraded_flags, policy_timing);
 		maybeLogPolicyDiagnostics(observation, action, executed_action);

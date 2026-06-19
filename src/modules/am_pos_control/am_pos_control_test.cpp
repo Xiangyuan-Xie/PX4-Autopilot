@@ -25,13 +25,13 @@ vehicle_local_position_s validLocalPosition()
 
 TEST(AmPosControlTest, FillPolicyObservationIncludesSourceTiming)
 {
-	RlToolsAdapter::Observation observation{};
+	AmPolicyAdapter::Observation observation{};
 
-	for (int i = 0; i < RlToolsAdapter::ObservationDim; ++i) {
+	for (int i = 0; i < AmPolicyAdapter::ObservationDim; ++i) {
 		observation[i] = static_cast<float>(i) * 0.5f;
 	}
 
-	const RlToolsAdapter::Action action{0.1f, 0.2f, 0.3f, 0.4f};
+	const AmPolicyAdapter::Action action{0.1f, 0.2f, 0.3f, 0.4f};
 
 	actuator_motors_s actuator_motors{};
 	actuator_motors.timestamp = 9000;
@@ -92,7 +92,7 @@ TEST(AmPosControlTest, FillPolicyObservationIncludesSourceTiming)
 	EXPECT_FLOAT_EQ(policy_observation.takeoff_ramp_scale, timing.takeoff_ramp_scale);
 	EXPECT_FLOAT_EQ(policy_observation.takeoff_ramped_speed_up, timing.takeoff_ramped_speed_up);
 
-	for (int i = 0; i < RlToolsAdapter::ObservationDim; ++i) {
+	for (int i = 0; i < AmPolicyAdapter::ObservationDim; ++i) {
 		EXPECT_FLOAT_EQ(policy_observation.observation[i], observation[i]);
 	}
 
@@ -756,8 +756,8 @@ TEST(AmPosControlTest, TakeoffRampScaleIsDiagnosticOnly)
 
 TEST(AmPosControlTest, MotorSetpointFromActionClampsRawActionWithoutRampScaling)
 {
-	const RlToolsAdapter::Action action{-0.5f, 0.5f, 1.5f, 0.25f};
-	RlToolsAdapter::Action executed_action{};
+	const AmPolicyAdapter::Action action{-0.5f, 0.5f, 1.5f, 0.25f};
+	AmPolicyAdapter::Action executed_action{};
 	actuator_motors_s actuator_motors{};
 
 	AmPosControl::fillMotorSetpointFromAction(actuator_motors, executed_action, action, 2000, 1500);

@@ -1,11 +1,9 @@
 /****************************************************************************
  *
- * Minimal RAPTOR-style adapter shim.
+ * rl_tools AM Position policy backend.
  *
  ****************************************************************************/
 #pragma once
-
-#include <cstdint>
 
 #include <rl_tools/operations/arm.h>
 #include <rl_tools/numeric_types/policy.h>
@@ -15,6 +13,7 @@
 #include <rl_tools/containers/tensor/tensor.h>
 
 #include "blob/policy.h"
+#include "policy_types.hpp"
 
 namespace rlt = rl_tools;
 
@@ -31,23 +30,17 @@ public:
 	static constexpr int ObservationDim = static_cast<int>(Policy::INPUT_SHAPE::LAST);
 	static constexpr int ActionDim = static_cast<int>(Policy::OUTPUT_SHAPE::LAST);
 
-	using Observation = float[ObservationDim];
-	using Action = float[ActionDim];
+	static_assert(ObservationDim == kPolicyObservationDim, "rl_tools policy observation dim mismatch");
+	static_assert(ActionDim == kPolicyActionDim, "rl_tools policy action dim mismatch");
+
+	using Observation = PolicyObservation;
+	using Action = PolicyAction;
 
 	bool init();
 	void reset();
-	bool infer(uint64_t now_us, const Observation &observation, Action &action);
+	bool infer(const Observation &observation, Action &action);
 
 private:
-	// Mirror the training control cadence: commit policy/RNN state at 100 Hz and hold the
-	// committed action between native steps.
-	static constexpr uint64_t kIntermediateStepUs = 2'500;
-	static constexpr uint64_t kNativeStepUs = 10'000;
-	static constexpr uint8_t kForceSyncNative = 4;
-	uint64_t _last_control_step_us{0};
-	uint64_t _last_native_step_us{0};
-	uint8_t _intermediate_steps_since_native{0};
-	Action _last_action{0.f, 0.f, 0.f, 0.f};
 	bool _runtime_initialized{false};
 
 	using InputShape = rlt::tensor::Shape<Index, 1, ObservationDim>;
