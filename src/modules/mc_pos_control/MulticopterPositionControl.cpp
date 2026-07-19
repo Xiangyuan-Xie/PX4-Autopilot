@@ -49,6 +49,7 @@ MulticopterPositionControl::MulticopterPositionControl(bool vtol) :
 	_sample_interval_s.update(0.01f); // 100 Hz default
 	parameters_update(true);
 	_tilt_limit_slew_rate.setSlewRate(.2f);
+	_vehicle_attitude.q[0] = 1.f;
 	_takeoff_status_pub.advertise();
 }
 
@@ -80,6 +81,9 @@ void MulticopterPositionControl::parameters_update(bool force)
 
 		// update parameters from storage
 		ModuleParams::updateParams();
+		const float fully_actuated_attitude_rate = math::radians(_param_mpc_fa_rp_rate.get());
+		_fully_actuated_roll_setpoint.setSlewRate(fully_actuated_attitude_rate);
+		_fully_actuated_pitch_setpoint.setSlewRate(fully_actuated_attitude_rate);
 
 		float sample_freq_hz = 1.f / _sample_interval_s.mean();
 
@@ -413,6 +417,16 @@ void MulticopterPositionControl::Run()
 		}
 
 		_vehicle_land_detected_sub.update(&_vehicle_land_detected);
+		_vehicle_attitude_sub.update(&_vehicle_attitude);
+		_control_allocator_status_sub.update(&_control_allocator_status);
+
+		if (_fully_actuated_control_status_sub.update(&_fully_actuated_control_status)
+		    && _fully_actuated_control_status.enabled && _fully_actuated_control_status.config_valid) {
+			_fully_actuated_thrust_scale = Vector3f(
+							       _fully_actuated_control_status.normalization_scale[3],
+							       _fully_actuated_control_status.normalization_scale[4],
+							       _fully_actuated_control_status.normalization_scale[5]);
+		}
 
 		if (_param_mpc_use_hte.get()) {
 			hover_thrust_estimate_s hte;
@@ -499,6 +513,8 @@ void MulticopterPositionControl::Run()
 			const bool not_taken_off             = (_takeoff.getTakeoffState() < TakeoffState::rampup);
 			const bool flying                    = (_takeoff.getTakeoffState() >= TakeoffState::flight);
 			const bool flying_but_ground_contact = (flying && _vehicle_land_detected.ground_contact);
+			const bool fully_actuated = _param_ca_airframe.get() == CA_AIRFRAME_FULLY_ACTUATED_MULTIROTOR;
+			_control.setFullyActuated(fully_actuated);
 
 			if (!flying) {
 				_control.setHoverThrust(_param_mpc_thr_hover.get());
@@ -568,6 +584,25 @@ void MulticopterPositionControl::Run()
 
 			_control.setState(states);
 
+			Vector3f unallocated_thrust_ned;
+			unallocated_thrust_ned.setZero();
+
+			if (fully_actuated && hrt_absolute_time() < _fully_actuated_control_status.timestamp + 500_ms
+			    && hrt_absolute_time() < _control_allocator_status.timestamp + 500_ms
+			    && _fully_actuated_thrust_scale.isAllFinite()
+			    && _fully_actuated_thrust_scale.min() > FLT_EPSILON) {
+				Vector3f unallocated_thrust_body(_control_allocator_status.unallocated_thrust);
+
+				for (int axis = 0; axis < 3; ++axis) {
+					unallocated_thrust_body(axis) *= _fully_actuated_thrust_scale(2)
+									 / _fully_actuated_thrust_scale(axis);
+				}
+
+				unallocated_thrust_ned = Dcmf(Quatf(_vehicle_attitude.q)) * unallocated_thrust_body;
+			}
+
+			_control.setThrustSaturationFeedback(unallocated_thrust_ned);
+
 			const hrt_abstime now = hrt_absolute_time();
 
 			// Run position control
@@ -607,7 +642,27 @@ void MulticopterPositionControl::Run()
 
 			// Publish attitude setpoint output
 			vehicle_attitude_setpoint_s attitude_setpoint{};
-			_control.getAttitudeSetpoint(attitude_setpoint);
+
+			if (fully_actuated) {
+				const Quatf attitude(_vehicle_attitude.q);
+
+				if (!_fully_actuated_attitude_initialized) {
+					const Eulerf euler(attitude);
+					_fully_actuated_roll_setpoint.setForcedValue(euler.phi());
+					_fully_actuated_pitch_setpoint.setForcedValue(euler.theta());
+					_fully_actuated_attitude_initialized = true;
+				}
+
+				_control.getFullyActuatedAttitudeSetpoint(attitude_setpoint, attitude,
+						_fully_actuated_roll_setpoint.update(0.f, dt),
+						_fully_actuated_pitch_setpoint.update(0.f, dt),
+						_fully_actuated_thrust_scale);
+
+			} else {
+				_fully_actuated_attitude_initialized = false;
+				_control.getAttitudeSetpoint(attitude_setpoint);
+			}
+
 			attitude_setpoint.timestamp = hrt_absolute_time();
 			_vehicle_attitude_setpoint_pub.publish(attitude_setpoint);
 
@@ -616,6 +671,7 @@ void MulticopterPositionControl::Run()
 			_takeoff.updateTakeoffState(_vehicle_control_mode.flag_armed, _vehicle_land_detected.landed, false, 10.f, true,
 						    vehicle_local_position.timestamp_sample);
 			_control.resetIntegral();
+			_fully_actuated_attitude_initialized = false;
 		}
 
 		// Publish takeoff status

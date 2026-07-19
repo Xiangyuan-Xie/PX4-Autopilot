@@ -113,6 +113,11 @@ public:
 	 * @param margin of normalized thrust that is kept for horizontal control e.g. 0.3
 	 */
 	void setHorizontalThrustMargin(const float margin);
+	void setFullyActuated(bool fully_actuated) { _fully_actuated = fully_actuated; }
+	void setThrustSaturationFeedback(const matrix::Vector3f &unallocated_thrust_ned)
+	{
+		_unallocated_thrust_ned = unallocated_thrust_ned;
+	}
 
 	/**
 	 * Set the maximum tilt angle in radians the output attitude is allowed to have
@@ -184,6 +189,9 @@ public:
 	 * @param attitude_setpoint reference to struct to fill up
 	 */
 	void getAttitudeSetpoint(vehicle_attitude_setpoint_s &attitude_setpoint) const;
+	void getFullyActuatedAttitudeSetpoint(vehicle_attitude_setpoint_s &attitude_setpoint,
+					      const matrix::Quatf &current_attitude, float roll_setpoint,
+					      float pitch_setpoint, const matrix::Vector3f &normalization_scale) const;
 
 	/**
 	 * All setpoints are set to NAN (uncontrolled). Timestampt zero.
@@ -218,12 +226,14 @@ private:
 
 	float _hover_thrust{}; ///< Thrust [HOVER_THRUST_MIN, HOVER_THRUST_MAX] with which the vehicle hovers not accelerating down or up with level orientation
 	bool _decouple_horizontal_and_vertical_acceleration{true}; ///< Ignore vertical acceleration setpoint to remove its effect on the tilt setpoint
+	bool _fully_actuated{false};
 
 	// States
 	matrix::Vector3f _pos; /**< current position */
 	matrix::Vector3f _vel; /**< current velocity */
 	matrix::Vector3f _vel_dot; /**< velocity derivative (replacement for acceleration estimate) */
 	matrix::Vector3f _vel_int; /**< integral term of the velocity controller */
+	matrix::Vector3f _unallocated_thrust_ned{};
 	float _yaw{}; /**< current heading */
 
 	// Setpoints

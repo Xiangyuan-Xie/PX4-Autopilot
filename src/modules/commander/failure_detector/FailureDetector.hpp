@@ -44,6 +44,7 @@
 
 #include "FailureInjector.hpp"
 
+#include <control_allocation/actuator_effectiveness/ActuatorEffectiveness.hpp>
 #include <lib/hysteresis/hysteresis.h>
 #include <lib/mathlib/mathlib.h>
 #include <lib/mathlib/math/filter/AlphaFilter.hpp>
@@ -54,6 +55,7 @@
 #include <uORB/Subscription.hpp>
 #include <uORB/Publication.hpp>
 #include <uORB/topics/actuator_motors.h>
+#include <uORB/topics/fully_actuated_control_status.h>
 #include <uORB/topics/sensor_selection.h>
 #include <uORB/topics/vehicle_attitude_setpoint.h>
 #include <uORB/topics/vehicle_attitude.h>
@@ -115,6 +117,7 @@ private:
 	uint8_t _motor_failure_esc_timed_out_mask{};      // ESC telemetry no longer available -> failure
 	uint8_t _motor_failure_esc_under_current_mask{};  // ESC drawing too little current -> failure
 	bool _motor_failure_esc_has_current[actuator_motors_s::NUM_CONTROLS] {false}; // true if some ESC had non-zero current (some don't support it)
+	bool _esc_motor_failure{false};
 	hrt_abstime _motor_failure_undercurrent_start_time[actuator_motors_s::NUM_CONTROLS] {};
 
 	uORB::Subscription _vehicle_attitude_sub{ORB_ID(vehicle_attitude)};
@@ -123,6 +126,7 @@ private:
 	uORB::Subscription _sensor_selection_sub{ORB_ID(sensor_selection)};
 	uORB::Subscription _vehicle_imu_status_sub{ORB_ID(vehicle_imu_status)};
 	uORB::Subscription _actuator_motors_sub{ORB_ID(actuator_motors)};
+	uORB::Subscription _fully_actuated_control_status_sub{ORB_ID(fully_actuated_control_status)};
 
 	FailureInjector _failure_injector;
 
@@ -140,6 +144,7 @@ private:
 		(ParamBool<px4::params::FD_ACT_EN>) _param_fd_actuator_en,
 		(ParamFloat<px4::params::FD_ACT_MOT_THR>) _param_fd_motor_throttle_thres,
 		(ParamFloat<px4::params::FD_ACT_MOT_C2T>) _param_fd_motor_current2throttle_thres,
-		(ParamInt<px4::params::FD_ACT_MOT_TOUT>) _param_fd_motor_time_thres
+		(ParamInt<px4::params::FD_ACT_MOT_TOUT>) _param_fd_motor_time_thres,
+		(ParamInt<px4::params::CA_AIRFRAME>) _param_ca_airframe
 	)
 };

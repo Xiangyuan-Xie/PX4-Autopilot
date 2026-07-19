@@ -152,6 +152,8 @@ public:
 	 */
 	const matrix::Matrix<float, NUM_AXES, NUM_ACTUATORS> &getEffectivenessMatrix() const { return _effectiveness; }
 
+	const matrix::Vector<float, NUM_AXES> &getControlAllocationScale() const { return _control_allocation_scale; }
+
 	/**
 	 * Set the minimum actuator values
 	 *

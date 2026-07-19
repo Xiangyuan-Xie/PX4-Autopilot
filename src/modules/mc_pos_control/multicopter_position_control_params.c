@@ -75,6 +75,21 @@ PARAM_DEFINE_INT32(MPC_USE_HTE, 1);
 PARAM_DEFINE_FLOAT(MPC_THR_XY_MARG, 0.3f);
 
 /**
+ * Fully actuated roll and pitch leveling rate
+ *
+ * Maximum roll and pitch setpoint slew rate when a fully actuated multirotor
+ * enters position control.
+ *
+ * @unit deg/s
+ * @min 1
+ * @max 360
+ * @decimal 0
+ * @increment 1
+ * @group Multicopter Position Control
+ */
+PARAM_DEFINE_FLOAT(MPC_FA_RP_RATE, 45.f);
+
+/**
  * Velocity low pass cutoff frequency
  *
  * A value of 0 disables the filter.

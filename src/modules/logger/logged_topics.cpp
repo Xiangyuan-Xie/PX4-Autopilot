@@ -66,6 +66,7 @@ void LoggedTopics::add_default_topics()
 	// add_optional_topic("esc_status", 250);
 	add_topic("esc_status");
 	add_topic("failure_detector_status", 100);
+	add_topic("fully_actuated_control_status", 50);
 	add_topic("failsafe_flags");
 	add_optional_topic("follow_target", 500);
 	add_optional_topic("follow_target_estimator", 200);

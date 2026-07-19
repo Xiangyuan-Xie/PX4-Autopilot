@@ -46,11 +46,14 @@
 #include <matrix/matrix/math.hpp>
 #include <uORB/topics/control_allocator_status.h>
 
+static constexpr int32_t CA_AIRFRAME_FULLY_ACTUATED_MULTIROTOR = 16;
+
 enum class AllocationMethod {
 	NONE = -1,
 	PSEUDO_INVERSE = 0,
 	SEQUENTIAL_DESATURATION = 1,
 	AUTO = 2,
+	FULLY_ACTUATED = 3,
 };
 
 enum class ActuatorType {

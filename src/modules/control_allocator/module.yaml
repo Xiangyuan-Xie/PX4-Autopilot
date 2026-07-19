@@ -33,6 +33,7 @@ parameters:
                 13: Rover (Mecanum)
                 14: Spacecraft 2D
                 15: Spacecraft 3D
+                16: Fully Actuated Multirotor
             default: 0
 
         CA_METHOD:
@@ -46,6 +47,7 @@ parameters:
                 0: Pseudo-inverse with output clipping
                 1: Pseudo-inverse with sequential desaturation technique
                 2: Automatic
+                3: Fully actuated priority allocation
             default: 2
 
         # Motor parameters
@@ -69,6 +71,36 @@ parameters:
                 10: Motor 11
                 11: Motor 12
             default: 0
+        CA_FA_HOV_MARG:
+            description:
+                short: Fully actuated hover actuator margin
+                long: Minimum distance of every hover actuator command from its lower and upper limit.
+            type: float
+            decimal: 2
+            increment: 0.01
+            min: 0.0
+            max: 0.4
+            default: 0.05
+        CA_FA_ERR_THR:
+            description:
+                short: Fully actuated allocation error threshold
+                long: Maximum normalized unallocated wrench component before the failure timer starts.
+            type: float
+            decimal: 2
+            increment: 0.01
+            min: 0.01
+            max: 1.0
+            default: 0.15
+        CA_FA_ERR_T:
+            description:
+                short: Fully actuated allocation failure delay
+            type: float
+            decimal: 1
+            increment: 0.1
+            unit: s
+            min: 0.1
+            max: 10.0
+            default: 1.0
         CA_R${i}_SLEW:
             description:
                 short: Motor ${i} slew rate limit

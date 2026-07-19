@@ -60,6 +60,7 @@ ControlAllocator::ControlAllocator() :
 	_actuator_motors_pub.advertise();
 	_actuator_servos_pub.advertise();
 	_actuator_servos_trim_pub.advertise();
+	_fully_actuated_control_status_pub.advertise();
 
 	for (int i = 0; i < MAX_NUM_MOTORS; ++i) {
 		char buffer[17];
@@ -156,6 +157,7 @@ ControlAllocator::update_allocation_method(bool force)
 
 			delete _control_allocation[i];
 			_control_allocation[i] = nullptr;
+			_active_allocation_method[i] = AllocationMethod::NONE;
 		}
 
 		_num_control_allocation = _actuator_effectiveness->numMatrices();
@@ -173,6 +175,8 @@ ControlAllocator::update_allocation_method(bool force)
 				method = desired_methods[i];
 			}
 
+			_active_allocation_method[i] = method;
+
 			switch (method) {
 			case AllocationMethod::PSEUDO_INVERSE:
 				_control_allocation[i] = new ControlAllocationPseudoInverse();
@@ -180,6 +184,10 @@ ControlAllocator::update_allocation_method(bool force)
 
 			case AllocationMethod::SEQUENTIAL_DESATURATION:
 				_control_allocation[i] = new ControlAllocationSequentialDesaturation();
+				break;
+
+			case AllocationMethod::FULLY_ACTUATED:
+				_control_allocation[i] = new ControlAllocationFullyActuated();
 				break;
 
 			default:
@@ -215,6 +223,10 @@ ControlAllocator::update_effectiveness_source()
 		case EffectivenessSource::NONE:
 		case EffectivenessSource::MULTIROTOR:
 			tmp = new ActuatorEffectivenessMultirotor(this);
+			break;
+
+		case EffectivenessSource::FULLY_ACTUATED_MULTIROTOR:
+			tmp = new ActuatorEffectivenessMultirotor(this, true);
 			break;
 
 		case EffectivenessSource::STANDARD_VTOL:
@@ -334,16 +346,14 @@ ControlAllocator::Run()
 	}
 
 	{
-		vehicle_status_s vehicle_status;
+		if (_vehicle_status_sub.update(&_vehicle_status)) {
 
-		if (_vehicle_status_sub.update(&vehicle_status)) {
-
-			_armed = vehicle_status.arming_state == vehicle_status_s::ARMING_STATE_ARMED;
+			_armed = _vehicle_status.arming_state == vehicle_status_s::ARMING_STATE_ARMED;
 
 			ActuatorEffectiveness::FlightPhase flight_phase{ActuatorEffectiveness::FlightPhase::HOVER_FLIGHT};
 
 			// Check if the current flight phase is HOVER or FIXED_WING
-			if (vehicle_status.vehicle_type == vehicle_status_s::VEHICLE_TYPE_ROTARY_WING) {
+			if (_vehicle_status.vehicle_type == vehicle_status_s::VEHICLE_TYPE_ROTARY_WING) {
 				flight_phase = ActuatorEffectiveness::FlightPhase::HOVER_FLIGHT;
 
 			} else {
@@ -351,8 +361,8 @@ ControlAllocator::Run()
 			}
 
 			// Special cases for VTOL in transition
-			if (vehicle_status.is_vtol && vehicle_status.in_transition_mode) {
-				if (vehicle_status.in_transition_to_fw) {
+			if (_vehicle_status.is_vtol && _vehicle_status.in_transition_mode) {
+				if (_vehicle_status.in_transition_to_fw) {
 					flight_phase = ActuatorEffectiveness::FlightPhase::TRANSITION_HF_TO_FF;
 
 				} else {
@@ -364,6 +374,8 @@ ControlAllocator::Run()
 			_actuator_effectiveness->setFlightPhase(flight_phase);
 		}
 	}
+
+	_vehicle_land_detected_sub.update(&_vehicle_land_detected);
 
 	{
 		vehicle_control_mode_s vehicle_control_mode;
@@ -449,6 +461,7 @@ ControlAllocator::Run()
 	// (i.e. anti-integrator windup)
 	if (now - _last_status_pub >= 5_ms) {
 		publish_control_allocator_status(0);
+		publish_fully_actuated_status();
 
 		if (_num_control_allocation > 1) {
 			publish_control_allocator_status(1);
@@ -562,23 +575,23 @@ ControlAllocator::update_effectiveness_matrix_if_needed(EffectivenessUpdateReaso
 			_control_allocation[i]->setActuatorMax(maximum[i]);
 			_control_allocation[i]->setSlewRateLimit(slew_rate[i]);
 
-			// Set all the elements of a row to 0 if that row has weak authority.
-			// That ensures that the algorithm doesn't try to control axes with only marginal control authority,
-			// which in turn would degrade the control of the main axes that actually should and can be controlled.
-
 			ActuatorEffectiveness::EffectivenessMatrix &matrix = config.effectiveness_matrices[i];
 
-			for (int n = 0; n < NUM_AXES; n++) {
-				bool all_entries_small = true;
+			if (_effectiveness_source_id != EffectivenessSource::FULLY_ACTUATED_MULTIROTOR) {
+				// Ignore weak axes for legacy allocators. Fully actuated geometries retain all axes and use
+				// the explicit rank, condition and hover-feasibility checks below.
+				for (int n = 0; n < NUM_AXES; n++) {
+					bool all_entries_small = true;
 
-				for (int m = 0; m < config.num_actuators_matrix[i]; m++) {
-					if (fabsf(matrix(n, m)) > 0.05f) {
-						all_entries_small = false;
+					for (int m = 0; m < config.num_actuators_matrix[i]; m++) {
+						if (fabsf(matrix(n, m)) > 0.05f) {
+							all_entries_small = false;
+						}
 					}
-				}
 
-				if (all_entries_small) {
-					matrix.row(n) = 0.f;
+					if (all_entries_small) {
+						matrix.row(n) = 0.f;
+					}
 				}
 			}
 
@@ -588,9 +601,110 @@ ControlAllocator::update_effectiveness_matrix_if_needed(EffectivenessUpdateReaso
 					config.linearization_point[i], total_num_actuators, reason == EffectivenessUpdateReason::CONFIGURATION_UPDATE);
 		}
 
+		update_fully_actuated_geometry_status();
+
 		trims.timestamp = hrt_absolute_time();
 		_actuator_servos_trim_pub.publish(trims);
 	}
+}
+
+void ControlAllocator::update_fully_actuated_geometry_status()
+{
+	const bool enabled = _effectiveness_source_id == EffectivenessSource::FULLY_ACTUATED_MULTIROTOR;
+	_fully_actuated_status.enabled = enabled;
+
+	if (!enabled || _num_control_allocation < 1
+	    || _active_allocation_method[0] != AllocationMethod::FULLY_ACTUATED) {
+		if (!enabled) {
+			_fully_actuated_failure_start = 0;
+			_fully_actuated_failure_latched = false;
+		}
+
+		_fully_actuated_status.config_valid = false;
+		_fully_actuated_status.matrix_full_rank = false;
+		_fully_actuated_status.hover_feasible = false;
+		_fully_actuated_status.allocation_failure = enabled;
+		_fully_actuated_status.timestamp = hrt_absolute_time();
+		_fully_actuated_control_status_pub.publish(_fully_actuated_status);
+		return;
+	}
+
+	auto *allocator = static_cast<ControlAllocationFullyActuated *>(_control_allocation[0]);
+	const auto metrics = allocator->effectivenessMetrics(_param_mpc_thr_hover.get(), _param_ca_fa_hov_marg.get());
+	const auto &scale = allocator->getControlAllocationScale();
+	bool scale_valid = true;
+
+	for (int axis = 0; axis < NUM_AXES; ++axis) {
+		_fully_actuated_status.normalization_scale[axis] = scale(axis);
+		scale_valid = scale_valid && PX4_ISFINITE(scale(axis)) && scale(axis) > FLT_EPSILON;
+	}
+
+	_fully_actuated_status.config_valid = _num_actuators[(int)ActuatorType::MOTORS] >= 6
+						      && _num_actuators[(int)ActuatorType::MOTORS] <= 8
+						      && _param_r_rev.get() == 0 && scale_valid;
+	_fully_actuated_status.matrix_rank = metrics.rank;
+	_fully_actuated_status.matrix_full_rank = metrics.rank == NUM_AXES;
+	_fully_actuated_status.hover_feasible = metrics.hover_feasible;
+	_fully_actuated_status.condition_number = metrics.condition_number;
+	_fully_actuated_status.hover_residual = metrics.hover_residual;
+	_fully_actuated_status.hover_actuator_min = metrics.hover_actuator_min;
+	_fully_actuated_status.hover_actuator_max = metrics.hover_actuator_max;
+	_fully_actuated_status.allocation_failure = !_fully_actuated_status.config_valid
+			|| !_fully_actuated_status.matrix_full_rank || !_fully_actuated_status.hover_feasible
+			|| _fully_actuated_failure_latched;
+	_fully_actuated_status.timestamp = hrt_absolute_time();
+	_fully_actuated_control_status_pub.publish(_fully_actuated_status);
+}
+
+void ControlAllocator::publish_fully_actuated_status()
+{
+	if (_effectiveness_source_id != EffectivenessSource::FULLY_ACTUATED_MULTIROTOR || _num_control_allocation < 1) {
+		return;
+	}
+
+	const auto &requested = _control_allocation[0]->getControlSetpoint();
+	const auto applied = _control_allocation[0]->getAllocatedControl();
+	float maximum_unallocated = 0.f;
+	float norm_squared = 0.f;
+
+	for (int axis = 0; axis < NUM_AXES; ++axis) {
+		const float unallocated = requested(axis) - applied(axis);
+		_fully_actuated_status.requested_wrench[axis] = requested(axis);
+		_fully_actuated_status.applied_wrench[axis] = applied(axis);
+		_fully_actuated_status.unallocated_wrench[axis] = unallocated;
+		maximum_unallocated = math::max(maximum_unallocated, fabsf(unallocated));
+		norm_squared += unallocated * unallocated;
+	}
+
+	_fully_actuated_status.unallocated_wrench_norm = sqrtf(norm_squared);
+	const hrt_abstime now = hrt_absolute_time();
+	const bool monitor_failure = _armed && !_vehicle_land_detected.landed && !_vehicle_land_detected.ground_contact
+				     && _vehicle_status.nav_state != vehicle_status_s::NAVIGATION_STATE_AUTO_LAND;
+
+	if (monitor_failure && maximum_unallocated > _param_ca_fa_err_thr.get()) {
+		if (_fully_actuated_failure_start == 0) {
+			_fully_actuated_failure_start = now;
+		}
+
+	} else {
+		_fully_actuated_failure_start = 0;
+	}
+
+	const bool persistent_failure = _fully_actuated_failure_start != 0
+					&& now > _fully_actuated_failure_start + (hrt_abstime)(_param_ca_fa_err_t.get() * 1_s);
+	const bool geometry_failure = !_fully_actuated_status.config_valid
+				      || !_fully_actuated_status.matrix_full_rank || !_fully_actuated_status.hover_feasible;
+
+	if (!_armed) {
+		_fully_actuated_failure_latched = false;
+
+	} else if (geometry_failure || persistent_failure) {
+		_fully_actuated_failure_latched = true;
+	}
+
+	_fully_actuated_status.allocation_failure = geometry_failure || _fully_actuated_failure_latched;
+	_fully_actuated_status.timestamp = now;
+	_fully_actuated_control_status_pub.publish(_fully_actuated_status);
 }
 
 void
@@ -806,6 +920,10 @@ int ControlAllocator::print_status()
 
 	case AllocationMethod::SEQUENTIAL_DESATURATION:
 		PX4_INFO("Method: Sequential desaturation");
+		break;
+
+	case AllocationMethod::FULLY_ACTUATED:
+		PX4_INFO("Method: Fully actuated priority");
 		break;
 
 	case AllocationMethod::AUTO:

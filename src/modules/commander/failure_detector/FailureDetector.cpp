@@ -86,6 +86,23 @@ bool FailureDetector::update(const vehicle_status_s &vehicle_status, const vehic
 		updateImbalancedPropStatus();
 	}
 
+	if (vehicle_status.arming_state != vehicle_status_s::ARMING_STATE_ARMED) {
+		_esc_motor_failure = false;
+		_status.flags.motor = false;
+
+	} else {
+		bool fully_actuated_failure = false;
+
+		if (_param_ca_airframe.get() == CA_AIRFRAME_FULLY_ACTUATED_MULTIROTOR) {
+			fully_actuated_control_status_s allocation_status{};
+			const bool received = _fully_actuated_control_status_sub.copy(&allocation_status);
+			const bool recent = received && hrt_absolute_time() < allocation_status.timestamp + 1_s;
+			fully_actuated_failure = !recent || !allocation_status.enabled || allocation_status.allocation_failure;
+		}
+
+		_status.flags.motor = _esc_motor_failure || fully_actuated_failure;
+	}
+
 	return _status.value != status_prev.value;
 }
 
@@ -333,14 +350,7 @@ void FailureDetector::updateMotorStatus(const vehicle_status_s &vehicle_status, 
 
 		bool critical_esc_failure = (_motor_failure_esc_timed_out_mask != 0 || _motor_failure_esc_under_current_mask != 0);
 
-		if (critical_esc_failure && !(_status.flags.motor)) {
-			// Add motor failure flag to bitfield
-			_status.flags.motor = true;
-
-		} else if (!critical_esc_failure && _status.flags.motor) {
-			// Reset motor failure flag
-			_status.flags.motor = false;
-		}
+		_esc_motor_failure = critical_esc_failure;
 
 	} else { // Disarmed
 		// reset ESC bitfield
@@ -349,6 +359,6 @@ void FailureDetector::updateMotorStatus(const vehicle_status_s &vehicle_status, 
 		}
 
 		_motor_failure_esc_under_current_mask = 0;
-		_status.flags.motor = false;
+		_esc_motor_failure = false;
 	}
 }

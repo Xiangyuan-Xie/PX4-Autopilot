@@ -46,6 +46,7 @@ px4_add_library(health_and_arming_checks
 	checks/escCheck.cpp
 	checks/estimatorCheck.cpp
 	checks/failureDetectorCheck.cpp
+	checks/fullyActuatedControlCheck.cpp
 	checks/flightTimeCheck.cpp
 	checks/geofenceCheck.cpp
 	checks/gyroCheck.cpp
@@ -73,5 +74,8 @@ px4_add_library(health_and_arming_checks
 add_dependencies(health_and_arming_checks mode_util)
 
 px4_add_functional_gtest(SRC HealthAndArmingChecksTest.cpp
+	LINKLIBS health_and_arming_checks mode_util
+	)
+px4_add_functional_gtest(SRC FullyActuatedControlCheckTest.cpp
 	LINKLIBS health_and_arming_checks mode_util
 	)

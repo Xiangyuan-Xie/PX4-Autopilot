@@ -39,14 +39,15 @@
 class ActuatorEffectivenessMultirotor : public ModuleParams, public ActuatorEffectiveness
 {
 public:
-	ActuatorEffectivenessMultirotor(ModuleParams *parent);
+	ActuatorEffectivenessMultirotor(ModuleParams *parent, bool fully_actuated = false);
 	virtual ~ActuatorEffectivenessMultirotor() = default;
 
 	bool getEffectivenessMatrix(Configuration &configuration, EffectivenessUpdateReason external_update) override;
 
 	void getDesiredAllocationMethod(AllocationMethod allocation_method_out[MAX_NUM_MATRICES]) const override
 	{
-		allocation_method_out[0] = AllocationMethod::SEQUENTIAL_DESATURATION;
+		allocation_method_out[0] = _fully_actuated ? AllocationMethod::FULLY_ACTUATED :
+					   AllocationMethod::SEQUENTIAL_DESATURATION;
 	}
 
 	void getNormalizeRPY(bool normalize[MAX_NUM_MATRICES]) const override
@@ -54,8 +55,9 @@ public:
 		normalize[0] = true;
 	}
 
-	const char *name() const override { return "Multirotor"; }
+	const char *name() const override { return _fully_actuated ? "Fully Actuated Multirotor" : "Multirotor"; }
 
 protected:
 	ActuatorEffectivenessRotors _mc_rotors;
+	const bool _fully_actuated;
 };

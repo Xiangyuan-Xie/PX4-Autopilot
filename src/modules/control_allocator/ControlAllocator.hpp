@@ -56,6 +56,7 @@
 #include <ActuatorEffectivenessSpacecraft.hpp>
 
 #include <ControlAllocation.hpp>
+#include <ControlAllocationFullyActuated.hpp>
 #include <ControlAllocationPseudoInverse.hpp>
 #include <ControlAllocationSequentialDesaturation.hpp>
 
@@ -79,6 +80,8 @@
 #include <uORB/topics/vehicle_thrust_setpoint.h>
 #include <uORB/topics/vehicle_status.h>
 #include <uORB/topics/failure_detector_status.h>
+#include <uORB/topics/fully_actuated_control_status.h>
+#include <uORB/topics/vehicle_land_detected.h>
 
 class ControlAllocator : public ModuleBase<ControlAllocator>, public ModuleParams, public px4::ScheduledWorkItem
 {
@@ -136,10 +139,15 @@ private:
 	void check_for_motor_failures();
 
 	void publish_control_allocator_status(int matrix_index);
+	void update_fully_actuated_geometry_status();
+	void publish_fully_actuated_status();
 
 	void publish_actuator_controls();
 
 	AllocationMethod _allocation_method_id{AllocationMethod::NONE};
+	AllocationMethod _active_allocation_method[ActuatorEffectiveness::MAX_NUM_MATRICES] {
+		AllocationMethod::NONE, AllocationMethod::NONE
+	};
 	ControlAllocation *_control_allocation[ActuatorEffectiveness::MAX_NUM_MATRICES] {}; 	///< class for control allocation calculations
 	int _num_control_allocation{0};
 	hrt_abstime _last_effectiveness_update{0};
@@ -161,6 +169,7 @@ private:
 		HELICOPTER_COAXIAL = 12,
 		SPACECRAFT_2D = 13,
 		SPACECRAFT_3D = 14,
+		FULLY_ACTUATED_MULTIROTOR = CA_AIRFRAME_FULLY_ACTUATED_MULTIROTOR,
 	};
 
 	enum class FailureMode {
@@ -187,11 +196,13 @@ private:
 	uORB::Publication<actuator_motors_s>	_actuator_motors_pub{ORB_ID(actuator_motors)};
 	uORB::Publication<actuator_servos_s>	_actuator_servos_pub{ORB_ID(actuator_servos)};
 	uORB::Publication<actuator_servos_trim_s>	_actuator_servos_trim_pub{ORB_ID(actuator_servos_trim)};
+	uORB::Publication<fully_actuated_control_status_s> _fully_actuated_control_status_pub{ORB_ID(fully_actuated_control_status)};
 
 	uORB::SubscriptionInterval _parameter_update_sub{ORB_ID(parameter_update), 1_s};
 
 	uORB::Subscription _vehicle_status_sub{ORB_ID(vehicle_status)};
 	uORB::Subscription _vehicle_control_mode_sub{ORB_ID(vehicle_control_mode)};
+	uORB::Subscription _vehicle_land_detected_sub{ORB_ID(vehicle_land_detected)};
 	uORB::Subscription _failure_detector_status_sub{ORB_ID(failure_detector_status)};
 
 	matrix::Vector3f _torque_sp;
@@ -206,6 +217,11 @@ private:
 	perf_counter_t	_loop_perf;			/**< loop duration performance counter */
 
 	bool _armed{false};
+	vehicle_status_s _vehicle_status{};
+	vehicle_land_detected_s _vehicle_land_detected{};
+	fully_actuated_control_status_s _fully_actuated_status{};
+	hrt_abstime _fully_actuated_failure_start{0};
+	bool _fully_actuated_failure_latched{false};
 	hrt_abstime _last_run{0};
 	hrt_abstime _timestamp_sample{0};
 	hrt_abstime _last_status_pub{0};
@@ -218,7 +234,11 @@ private:
 		(ParamInt<px4::params::CA_AIRFRAME>) _param_ca_airframe,
 		(ParamInt<px4::params::CA_METHOD>) _param_ca_method,
 		(ParamInt<px4::params::CA_FAILURE_MODE>) _param_ca_failure_mode,
-		(ParamInt<px4::params::CA_R_REV>) _param_r_rev
+		(ParamInt<px4::params::CA_R_REV>) _param_r_rev,
+		(ParamFloat<px4::params::CA_FA_HOV_MARG>) _param_ca_fa_hov_marg,
+		(ParamFloat<px4::params::CA_FA_ERR_THR>) _param_ca_fa_err_thr,
+		(ParamFloat<px4::params::CA_FA_ERR_T>) _param_ca_fa_err_t,
+		(ParamFloat<px4::params::MPC_THR_HOVER>) _param_mpc_thr_hover
 	)
 
 };

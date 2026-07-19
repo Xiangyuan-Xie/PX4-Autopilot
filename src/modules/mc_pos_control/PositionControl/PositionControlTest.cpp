@@ -33,6 +33,7 @@
 
 #include <gtest/gtest.h>
 #include <PositionControl.hpp>
+#include <geo/geo.h>
 #include <px4_defines.h>
 
 using namespace matrix;
@@ -126,6 +127,42 @@ TEST_F(PositionControlBasicDirectionTest, VelocityDirection)
 	Vector3f(.1f, .1f, -.1f).copyTo(_input_setpoint.velocity);
 	EXPECT_TRUE(runController());
 	checkDirection();
+}
+
+TEST(PositionControlTest, FullyActuatedKeepsHorizontalThrustAtLevelAttitude)
+{
+	PositionControl control;
+	control.setFullyActuated(true);
+	control.setPositionGains(Vector3f(1.f, 1.f, 1.f));
+	control.setVelocityGains(Vector3f(1.f, 1.f, 1.f), Vector3f(), Vector3f());
+	control.setVelocityLimits(5.f, 5.f, 5.f);
+	control.setThrustLimits(0.f, 1.f);
+	control.setHorizontalThrustMargin(0.3f);
+	control.setHoverThrust(0.5f);
+	control.setState({Vector3f(), Vector3f(), Vector3f(), 0.f});
+
+	trajectory_setpoint_s input = PositionControl::empty_trajectory_setpoint;
+	Vector3f(18.f, 2.f, 0.f).copyTo(input.acceleration);
+	input.yaw = 0.3f;
+	control.setInputSetpoint(input);
+	ASSERT_TRUE(control.update(0.01f));
+
+	vehicle_local_position_setpoint_s local_setpoint{};
+	control.getLocalPositionSetpoint(local_setpoint);
+	EXPECT_NEAR(local_setpoint.thrust[0], 9.f / CONSTANTS_ONE_G, 1e-6f);
+	EXPECT_NEAR(local_setpoint.thrust[1], 1.f / CONSTANTS_ONE_G, 1e-6f);
+	EXPECT_NEAR(local_setpoint.thrust[2], -0.5f, 1e-6f);
+
+	vehicle_attitude_setpoint_s attitude_setpoint{};
+	control.getFullyActuatedAttitudeSetpoint(attitude_setpoint, Quatf(1.f, 0.f, 0.f, 0.f), 0.f, 0.f,
+			Vector3f(2.f, 3.f, 1.f));
+	const Eulerf attitude(Quatf(attitude_setpoint.q_d));
+	EXPECT_NEAR(attitude.phi(), 0.f, 1e-6f);
+	EXPECT_NEAR(attitude.theta(), 0.f, 1e-6f);
+	EXPECT_NEAR(attitude.psi(), 0.3f, 1e-6f);
+	EXPECT_NEAR(attitude_setpoint.thrust_body[0], local_setpoint.thrust[0] * 2.f, 1e-6f);
+	EXPECT_NEAR(attitude_setpoint.thrust_body[1], local_setpoint.thrust[1] * 3.f, 1e-6f);
+	EXPECT_NEAR(attitude_setpoint.thrust_body[2], local_setpoint.thrust[2], 1e-6f);
 }
 
 TEST_F(PositionControlBasicTest, TiltLimit)

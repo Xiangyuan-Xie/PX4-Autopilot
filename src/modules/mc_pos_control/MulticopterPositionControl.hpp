@@ -41,6 +41,7 @@
 #include "Takeoff/Takeoff.hpp"
 #include "GotoControl/GotoControl.hpp"
 
+#include <control_allocation/actuator_effectiveness/ActuatorEffectiveness.hpp>
 #include <drivers/drv_hrt.h>
 #include <lib/mathlib/math/filter/AlphaFilter.hpp>
 #include <lib/mathlib/math/filter/NotchFilter.hpp>
@@ -62,6 +63,9 @@
 #include <uORB/topics/parameter_update.h>
 #include <uORB/topics/trajectory_setpoint.h>
 #include <uORB/topics/vehicle_attitude_setpoint.h>
+#include <uORB/topics/vehicle_attitude.h>
+#include <uORB/topics/control_allocator_status.h>
+#include <uORB/topics/fully_actuated_control_status.h>
 #include <uORB/topics/vehicle_constraints.h>
 #include <uORB/topics/vehicle_control_mode.h>
 #include <uORB/topics/vehicle_land_detected.h>
@@ -108,6 +112,9 @@ private:
 	uORB::Subscription _vehicle_constraints_sub{ORB_ID(vehicle_constraints)};
 	uORB::Subscription _vehicle_control_mode_sub{ORB_ID(vehicle_control_mode)};
 	uORB::Subscription _vehicle_land_detected_sub{ORB_ID(vehicle_land_detected)};
+	uORB::Subscription _vehicle_attitude_sub{ORB_ID(vehicle_attitude)};
+	uORB::Subscription _control_allocator_status_sub{ORB_ID(control_allocator_status)};
+	uORB::Subscription _fully_actuated_control_status_sub{ORB_ID(fully_actuated_control_status)};
 
 	hrt_abstime _time_stamp_last_loop{0};		/**< time stamp of last loop iteration */
 	hrt_abstime _time_position_control_enabled{0};
@@ -115,6 +122,9 @@ private:
 	trajectory_setpoint_s _setpoint{PositionControl::empty_trajectory_setpoint};
 	trajectory_setpoint_s _last_valid_setpoint{PositionControl::empty_trajectory_setpoint};
 	vehicle_control_mode_s _vehicle_control_mode{};
+	vehicle_attitude_s _vehicle_attitude{};
+	control_allocator_status_s _control_allocator_status{};
+	fully_actuated_control_status_s _fully_actuated_control_status{};
 
 	vehicle_constraints_s _vehicle_constraints {
 		.timestamp = 0,
@@ -189,7 +199,9 @@ private:
 
 		(ParamFloat<px4::params::MPC_XY_ERR_MAX>) _param_mpc_xy_err_max,
 		(ParamFloat<px4::params::MPC_YAWRAUTO_MAX>) _param_mpc_yawrauto_max,
-		(ParamFloat<px4::params::MPC_YAWRAUTO_ACC>) _param_mpc_yawrauto_acc
+		(ParamFloat<px4::params::MPC_YAWRAUTO_ACC>) _param_mpc_yawrauto_acc,
+		(ParamInt<px4::params::CA_AIRFRAME>) _param_ca_airframe,
+		(ParamFloat<px4::params::MPC_FA_RP_RATE>) _param_mpc_fa_rp_rate
 	);
 
 	math::WelfordMean<float> _sample_interval_s{};
@@ -219,6 +231,10 @@ private:
 	static constexpr float MAX_SAFE_TILT_DEG = 89.f; // Numerical issues above this value due to tanf
 
 	SlewRate<float> _tilt_limit_slew_rate;
+	SlewRate<float> _fully_actuated_roll_setpoint;
+	SlewRate<float> _fully_actuated_pitch_setpoint;
+	matrix::Vector3f _fully_actuated_thrust_scale{1.f, 1.f, 1.f};
+	bool _fully_actuated_attitude_initialized{false};
 
 	uint8_t _vxy_reset_counter{0};
 	uint8_t _vz_reset_counter{0};

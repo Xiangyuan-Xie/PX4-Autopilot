@@ -1,0 +1,76 @@
+#!/bin/sh
+#
+# @name Tarot 680 Fully Actuated Hexarotor
+#
+# @type Hexarotor x
+# @class Copter
+#
+# @maintainer Xiangyuan Xie
+#
+
+. ${R}etc/init.d/rc.mc_defaults
+
+# MAV_TYPE_HEXAROTOR 13
+param set-default MAV_TYPE 13
+
+param set-default CA_AIRFRAME 16
+param set-default CA_METHOD 3
+param set-default CA_R_REV 0
+param set-default CA_ROTOR_COUNT 6
+param set-default THR_MDL_FAC 0.18223090081506718
+
+param set-default CA_ROTOR0_PX 0.2696730783471678
+param set-default CA_ROTOR0_PY 0.17379454001249123
+param set-default CA_ROTOR0_PZ 0.07083350177812778
+param set-default CA_ROTOR0_AX -0.2499992974
+param set-default CA_ROTOR0_AY 0.4330087830
+param set-default CA_ROTOR0_AZ -0.8660275660
+param set-default CA_ROTOR0_CT 21.475977391585644
+param set-default CA_ROTOR0_KM 0.016089552569932955
+
+param set-default CA_ROTOR1_PX -0.0676699216528322
+param set-default CA_ROTOR1_PY 0.3673245400124912
+param set-default CA_ROTOR1_PZ 0.06959650177812779
+param set-default CA_ROTOR1_AX 0.4999980098
+param set-default CA_ROTOR1_AY 0.0
+param set-default CA_ROTOR1_AZ -0.8660265528
+param set-default CA_ROTOR1_CT 21.475977391585644
+param set-default CA_ROTOR1_KM -0.016089552569932955
+
+param set-default CA_ROTOR2_PX -0.3660369216528322
+param set-default CA_ROTOR2_PY 0.19377454001249123
+param set-default CA_ROTOR2_PZ 0.07068050177812779
+param set-default CA_ROTOR2_AX -0.2499992974
+param set-default CA_ROTOR2_AY -0.4330087830
+param set-default CA_ROTOR2_AZ -0.8660275660
+param set-default CA_ROTOR2_CT 21.475977391585644
+param set-default CA_ROTOR2_KM 0.016089552569932955
+
+param set-default CA_ROTOR3_PX -0.3654969216528322
+param set-default CA_ROTOR3_PY -0.19405545998750878
+param set-default CA_ROTOR3_PZ 0.07006150177812778
+param set-default CA_ROTOR3_AX -0.2499992974
+param set-default CA_ROTOR3_AY 0.4330087830
+param set-default CA_ROTOR3_AZ -0.8660275660
+param set-default CA_ROTOR3_CT 21.475977391585644
+param set-default CA_ROTOR3_KM -0.016089552569932955
+
+param set-default CA_ROTOR4_PX -0.0665989216528322
+param set-default CA_ROTOR4_PY -0.3666754599875088
+param set-default CA_ROTOR4_PZ 0.07021550177812778
+param set-default CA_ROTOR4_AX 0.4999980098
+param set-default CA_ROTOR4_AY 0.0
+param set-default CA_ROTOR4_AZ -0.8660265528
+param set-default CA_ROTOR4_CT 21.475977391585644
+param set-default CA_ROTOR4_KM 0.016089552569932955
+
+param set-default CA_ROTOR5_PX 0.2702130783471678
+param set-default CA_ROTOR5_PY -0.17221545998750878
+param set-default CA_ROTOR5_PZ 0.07021550177812778
+param set-default CA_ROTOR5_AX -0.2499992974
+param set-default CA_ROTOR5_AY -0.4330087830
+param set-default CA_ROTOR5_AZ -0.8660275660
+param set-default CA_ROTOR5_CT 21.475977391585644
+param set-default CA_ROTOR5_KM -0.016089552569932955
+
+param set-default COM_ACT_FAIL_ACT 2
