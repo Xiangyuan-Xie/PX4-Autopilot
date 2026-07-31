@@ -1,0 +1,45 @@
+uint64 timestamp
+
+bool module_running
+bool manual_control_available
+bool vehicle_state_valid
+bool attitude_valid
+bool angular_velocity_valid
+bool arm_state_valid
+bool trajectory_setpoint_valid
+bool offboard_control_mode_fresh
+bool offboard_control_mode_supported
+bool offboard_control_mode_valid
+bool am_pose_available
+bool offboard_am_pose_available
+
+uint8 OFFBOARD_CONTROLLER_INACTIVE = 0
+uint8 OFFBOARD_CONTROLLER_NATIVE = 1
+uint8 OFFBOARD_CONTROLLER_AM_POSE = 2
+uint8 active_offboard_controller
+bool offboard_selector_mismatch
+
+bool policy_loaded
+uint8 policy_observation_dim
+bool policy_uses_arm_position
+bool policy_uses_arm_velocity
+bool policy_blend_active
+
+bool handover_action_ready
+bool handover_action_consumed
+float32 handover_action_age_s
+
+bool trajectory_message_valid
+bool velocity_setpoint_lost
+
+uint8 REFERENCE_HOLD = 0
+uint8 REFERENCE_POINT = 1
+uint8 REFERENCE_TRAJECTORY = 2
+uint8 REFERENCE_VELOCITY = 3
+uint8 active_reference_source
+
+uint32 active_trajectory_id
+uint8 trajectory_point_count
+uint8 trajectory_segment_index
+float32 trajectory_elapsed_s
+float32 trajectory_duration_s

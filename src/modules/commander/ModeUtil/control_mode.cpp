@@ -84,6 +84,15 @@ void getVehicleControlMode(uint8_t nav_state, uint8_t vehicle_type,
 		vehicle_control_mode.flag_control_allocation_enabled = true;
 		break;
 
+	case vehicle_status_s::NAVIGATION_STATE_AM_POSE:
+		vehicle_control_mode.flag_control_manual_enabled = true;
+		vehicle_control_mode.flag_control_position_enabled = true;
+		vehicle_control_mode.flag_control_velocity_enabled = true;
+		vehicle_control_mode.flag_control_altitude_enabled = true;
+		vehicle_control_mode.flag_control_climb_rate_enabled = true;
+		vehicle_control_mode.flag_control_termination_enabled = true;
+		break;
+
 	case vehicle_status_s::NAVIGATION_STATE_AUTO_RTL:
 	case vehicle_status_s::NAVIGATION_STATE_AUTO_LAND:
 	case vehicle_status_s::NAVIGATION_STATE_AUTO_PRECLAND:
@@ -123,7 +132,16 @@ void getVehicleControlMode(uint8_t nav_state, uint8_t vehicle_type,
 	case vehicle_status_s::NAVIGATION_STATE_OFFBOARD:
 		vehicle_control_mode.flag_control_offboard_enabled = true;
 
-		if (offboard_control_mode.position) {
+		if (offboard_control_mode.controller_type == offboard_control_mode_s::CONTROLLER_TYPE_AM_POSE
+		    && (offboard_control_mode.position || offboard_control_mode.velocity)) {
+			vehicle_control_mode.flag_control_position_enabled = true;
+			vehicle_control_mode.flag_control_velocity_enabled = true;
+			vehicle_control_mode.flag_control_altitude_enabled = true;
+			vehicle_control_mode.flag_control_climb_rate_enabled = true;
+			vehicle_control_mode.flag_control_termination_enabled = true;
+
+		} else if (offboard_control_mode.controller_type == offboard_control_mode_s::CONTROLLER_TYPE_NATIVE
+			   && offboard_control_mode.position) {
 			vehicle_control_mode.flag_control_position_enabled = true;
 			vehicle_control_mode.flag_control_velocity_enabled = true;
 			vehicle_control_mode.flag_control_altitude_enabled = true;
@@ -133,7 +151,8 @@ void getVehicleControlMode(uint8_t nav_state, uint8_t vehicle_type,
 			vehicle_control_mode.flag_control_rates_enabled = true;
 			vehicle_control_mode.flag_control_allocation_enabled = true;
 
-		} else if (offboard_control_mode.velocity) {
+		} else if (offboard_control_mode.controller_type == offboard_control_mode_s::CONTROLLER_TYPE_NATIVE
+			   && offboard_control_mode.velocity) {
 			vehicle_control_mode.flag_control_velocity_enabled = true;
 			vehicle_control_mode.flag_control_altitude_enabled = true;
 			vehicle_control_mode.flag_control_climb_rate_enabled = true;
@@ -142,22 +161,26 @@ void getVehicleControlMode(uint8_t nav_state, uint8_t vehicle_type,
 			vehicle_control_mode.flag_control_rates_enabled = true;
 			vehicle_control_mode.flag_control_allocation_enabled = true;
 
-		} else if (offboard_control_mode.acceleration) {
+		} else if (offboard_control_mode.controller_type == offboard_control_mode_s::CONTROLLER_TYPE_NATIVE
+			   && offboard_control_mode.acceleration) {
 			vehicle_control_mode.flag_control_acceleration_enabled = true;
 			vehicle_control_mode.flag_control_attitude_enabled = true;
 			vehicle_control_mode.flag_control_rates_enabled = true;
 			vehicle_control_mode.flag_control_allocation_enabled = true;
 
-		} else if (offboard_control_mode.attitude) {
+		} else if (offboard_control_mode.controller_type == offboard_control_mode_s::CONTROLLER_TYPE_NATIVE
+			   && offboard_control_mode.attitude) {
 			vehicle_control_mode.flag_control_attitude_enabled = true;
 			vehicle_control_mode.flag_control_rates_enabled = true;
 			vehicle_control_mode.flag_control_allocation_enabled = true;
 
-		} else if (offboard_control_mode.body_rate) {
+		} else if (offboard_control_mode.controller_type == offboard_control_mode_s::CONTROLLER_TYPE_NATIVE
+			   && offboard_control_mode.body_rate) {
 			vehicle_control_mode.flag_control_rates_enabled = true;
 			vehicle_control_mode.flag_control_allocation_enabled = true;
 
-		} else if (offboard_control_mode.thrust_and_torque) {
+		} else if (offboard_control_mode.controller_type == offboard_control_mode_s::CONTROLLER_TYPE_NATIVE
+			   && offboard_control_mode.thrust_and_torque) {
 			vehicle_control_mode.flag_control_allocation_enabled = true;
 		}
 
@@ -184,6 +207,45 @@ void getVehicleControlMode(uint8_t nav_state, uint8_t vehicle_type,
 		break;
 	}
 
+}
+
+bool isAmPoseControlMode(const vehicle_control_mode_s &vehicle_control_mode)
+{
+	return vehicle_control_mode.flag_control_manual_enabled
+	       && !vehicle_control_mode.flag_control_auto_enabled
+	       && !vehicle_control_mode.flag_control_offboard_enabled
+	       && vehicle_control_mode.flag_control_position_enabled
+	       && vehicle_control_mode.flag_control_velocity_enabled
+	       && vehicle_control_mode.flag_control_altitude_enabled
+	       && vehicle_control_mode.flag_control_climb_rate_enabled
+	       && !vehicle_control_mode.flag_control_acceleration_enabled
+	       && !vehicle_control_mode.flag_control_attitude_enabled
+	       && !vehicle_control_mode.flag_control_rates_enabled
+	       && !vehicle_control_mode.flag_control_allocation_enabled
+	       && vehicle_control_mode.flag_control_termination_enabled;
+}
+
+bool isAnyAmPoseControlMode(const vehicle_control_mode_s &vehicle_control_mode)
+{
+	const bool matches_am_pose_shape = !vehicle_control_mode.flag_control_auto_enabled
+					   && vehicle_control_mode.flag_control_position_enabled
+					   && vehicle_control_mode.flag_control_velocity_enabled
+					   && vehicle_control_mode.flag_control_altitude_enabled
+					   && vehicle_control_mode.flag_control_climb_rate_enabled
+					   && !vehicle_control_mode.flag_control_acceleration_enabled
+					   && !vehicle_control_mode.flag_control_attitude_enabled
+					   && !vehicle_control_mode.flag_control_rates_enabled
+					   && !vehicle_control_mode.flag_control_allocation_enabled
+					   && vehicle_control_mode.flag_control_termination_enabled;
+
+	return matches_am_pose_shape
+	       && (vehicle_control_mode.flag_control_manual_enabled != vehicle_control_mode.flag_control_offboard_enabled);
+}
+
+bool isAmPoseOffboardControlMode(const vehicle_control_mode_s &vehicle_control_mode)
+{
+	return isAnyAmPoseControlMode(vehicle_control_mode)
+	       && vehicle_control_mode.flag_control_offboard_enabled;
 }
 
 } // namespace mode_util

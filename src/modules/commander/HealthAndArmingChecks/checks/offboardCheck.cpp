@@ -33,6 +33,8 @@
 
 #include "offboardCheck.hpp"
 
+#include "../../ModeUtil/control_mode.hpp"
+
 using namespace time_literals;
 
 void OffboardChecks::checkAndReport(const Context &context, Report &reporter)
@@ -46,9 +48,28 @@ void OffboardChecks::checkAndReport(const Context &context, Report &reporter)
 		bool data_is_recent = hrt_absolute_time() < offboard_control_mode.timestamp
 				      + static_cast<hrt_abstime>(_param_com_of_loss_t.get() * 1_s);
 
-		bool offboard_available = (offboard_control_mode.position || offboard_control_mode.velocity
-					   || offboard_control_mode.acceleration || offboard_control_mode.attitude || offboard_control_mode.body_rate
-					   || offboard_control_mode.thrust_and_torque || offboard_control_mode.direct_actuator) && data_is_recent;
+		const bool native_controller = offboard_control_mode.controller_type
+					       == offboard_control_mode_s::CONTROLLER_TYPE_NATIVE;
+		const bool am_pose_controller = offboard_control_mode.controller_type
+						== offboard_control_mode_s::CONTROLLER_TYPE_AM_POSE;
+		const bool native_setpoint = offboard_control_mode.position || offboard_control_mode.velocity
+					     || offboard_control_mode.acceleration || offboard_control_mode.attitude
+					     || offboard_control_mode.body_rate || offboard_control_mode.thrust_and_torque
+					     || offboard_control_mode.direct_actuator;
+		const bool am_pose_setpoint = offboard_control_mode.position || offboard_control_mode.velocity;
+		bool offboard_available = data_is_recent
+					  && ((native_controller && native_setpoint) || (am_pose_controller && am_pose_setpoint));
+
+		vehicle_control_mode_s vehicle_control_mode{};
+
+		if (context.status().nav_state == vehicle_status_s::NAVIGATION_STATE_OFFBOARD
+		    && _vehicle_control_mode_sub.copy(&vehicle_control_mode)) {
+			const uint8_t active_controller = mode_util::isAmPoseOffboardControlMode(vehicle_control_mode)
+						  ? offboard_control_mode_s::CONTROLLER_TYPE_AM_POSE
+						  : offboard_control_mode_s::CONTROLLER_TYPE_NATIVE;
+			offboard_available = offboard_available
+					     && offboard_control_mode.controller_type == active_controller;
+		}
 
 		if (offboard_control_mode.position && reporter.failsafeFlags().local_position_invalid) {
 			offboard_available = false;

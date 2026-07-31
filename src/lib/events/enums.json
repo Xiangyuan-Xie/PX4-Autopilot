@@ -79,6 +79,10 @@
                             "name": "acro",
                             "description": "Acro"
                         },
+                        "2048": {
+                            "name": "am_pose",
+                            "description": "AM Pose"
+                        },
                         "16384": {
                             "name": "offboard",
                             "description": "Offboard"
@@ -537,76 +541,84 @@
                             "description": "Acro"
                         },
                         "7": {
+                            "name": "unused5",
+                            "description": "Unused"
+                        },
+                        "8": {
                             "name": "offboard",
                             "description": "Offboard"
                         },
-                        "8": {
+                        "9": {
                             "name": "stab",
                             "description": "Stabilized"
                         },
-                        "9": {
+                        "11": {
                             "name": "position_slow",
                             "description": "Position Slow"
                         },
-                        "10": {
+                        "12": {
                             "name": "auto_takeoff",
                             "description": "Takeoff"
                         },
-                        "11": {
+                        "13": {
                             "name": "auto_land",
                             "description": "Land"
                         },
-                        "12": {
+                        "14": {
                             "name": "auto_follow_target",
                             "description": "Follow Target"
                         },
-                        "13": {
+                        "15": {
                             "name": "auto_precland",
                             "description": "Precision Landing"
                         },
-                        "14": {
+                        "16": {
                             "name": "orbit",
                             "description": "Orbit"
                         },
-                        "15": {
+                        "17": {
                             "name": "auto_vtol_takeoff",
                             "description": "Vtol Takeoff"
                         },
-                        "16": {
+                        "18": {
                             "name": "external1",
                             "description": "External 1"
                         },
-                        "17": {
+                        "19": {
                             "name": "external2",
                             "description": "External 2"
                         },
-                        "18": {
+                        "20": {
                             "name": "external3",
                             "description": "External 3"
                         },
-                        "19": {
+                        "21": {
                             "name": "external4",
                             "description": "External 4"
                         },
-                        "20": {
+                        "22": {
                             "name": "external5",
                             "description": "External 5"
                         },
-                        "21": {
+                        "23": {
                             "name": "external6",
                             "description": "External 6"
                         },
-                        "22": {
+                        "24": {
                             "name": "external7",
                             "description": "External 7"
                         },
-                        "23": {
+                        "25": {
                             "name": "external8",
                             "description": "External 8"
                         },
-                        "24": {
+                        "26": {
                             "name": "altitude_cruise",
                             "description": "Altitude Cruise"
+                        },
+                        "27": {
+                            "name": "am_pose",
+                            "description": "AM Pose"
                         },
                         "255": {
                             "name": "unknown",
@@ -738,6 +750,7 @@
                     "4": [50593792],
                     "5": [84148224],
                     "10": [327680],
+                    "11": [67305472],
                     "14": [393216],
                     "15": [458752],
                     "17": [33816576],

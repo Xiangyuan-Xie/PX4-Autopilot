@@ -103,3 +103,7 @@
 [submodule "src/drivers/ins/sbgecom/sbgECom"]
 	path = src/drivers/ins/sbgecom/sbgECom
 	url = https://github.com/PX4/sbgECom.git
+[submodule "third_party/rl_tools"]
+	path = third_party/rl_tools
+	url = https://github.com/Xiangyuan-Xie/rl-tools
+	branch = ACEPliot

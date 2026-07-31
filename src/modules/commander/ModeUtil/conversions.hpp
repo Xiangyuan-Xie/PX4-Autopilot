@@ -54,6 +54,8 @@ static inline navigation_mode_t navigation_mode(uint8_t nav_state)
 
 	case vehicle_status_s::NAVIGATION_STATE_POSCTL: return navigation_mode_t::posctl;
 
+	case vehicle_status_s::NAVIGATION_STATE_AM_POSE: return navigation_mode_t::am_pose;
+
 	case vehicle_status_s::NAVIGATION_STATE_AUTO_MISSION: return navigation_mode_t::auto_mission;
 
 	case vehicle_status_s::NAVIGATION_STATE_AUTO_LOITER: return navigation_mode_t::auto_loiter;

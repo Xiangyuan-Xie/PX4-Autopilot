@@ -1,0 +1,8 @@
+{
+  "manifest_version": 1,
+  "policy_name": "best_checkpoint_model_650",
+  "observation_dim": 134,
+  "arm_observation": "position",
+  "action_dim": 4,
+  "action_semantics": "normalized_throttle"
+}

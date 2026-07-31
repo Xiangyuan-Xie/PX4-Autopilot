@@ -376,6 +376,10 @@ int Commander::custom_command(int argc, char *argv[])
 			} else if (!strcmp(argv[1], "posctl")) {
 				send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_POSCTL);
 
+			} else if (!strcmp(argv[1], "am_pose")) {
+				send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_POSCTL,
+						     PX4_CUSTOM_SUB_MODE_POSCTL_AM_POSE);
+
 			} else if (!strcmp(argv[1], "position:slow")) {
 				send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_POSCTL,
 						     PX4_CUSTOM_SUB_MODE_POSCTL_SLOW);
@@ -608,8 +612,9 @@ transition_result_t Commander::arm(arm_disarm_reason_t calling_reason, bool run_
 		}
 
 		_health_and_arming_checks.update(false, true);
+		const uint8_t arming_check_nav_state = getNavStateForArmingCheck(_vehicle_status.nav_state, _user_mode_intention.get());
 
-		if (!_health_and_arming_checks.canArm(_vehicle_status.nav_state)) {
+		if (!_health_and_arming_checks.canArm(arming_check_nav_state)) {
 			tune_negative(true);
 			mavlink_log_critical(&_mavlink_log_pub, "Arming denied: Resolve system health failures first\t");
 			events::send(events::ID("commander_arm_denied_resolve_failures"), {events::Log::Critical, events::LogInternal::Info},
@@ -644,14 +649,10 @@ transition_result_t Commander::disarm(arm_disarm_reason_t calling_reason, bool f
 	if (!forced) {
 		const bool landed = (_vehicle_land_detected.landed || _vehicle_land_detected.maybe_landed
 				     || is_ground_vehicle(_vehicle_status));
-		const bool mc_manual_thrust_mode = _vehicle_status.vehicle_type == vehicle_status_s::VEHICLE_TYPE_ROTARY_WING
-						   && _vehicle_control_mode.flag_control_manual_enabled
-						   && !_vehicle_control_mode.flag_control_climb_rate_enabled;
-		const bool commanded_by_rc = (calling_reason == arm_disarm_reason_t::stick_gesture)
-					     || (calling_reason == arm_disarm_reason_t::rc_switch)
-					     || (calling_reason == arm_disarm_reason_t::rc_button);
+		const bool manual_disarm_in_air_allowed = manualDisarmInAirAllowed(_vehicle_status, _vehicle_control_mode,
+				calling_reason, _param_com_disarm_man.get());
 
-		if (!landed && !(mc_manual_thrust_mode && commanded_by_rc && _param_com_disarm_man.get())) {
+		if (!landed && !manual_disarm_in_air_allowed) {
 			if (calling_reason != arm_disarm_reason_t::stick_gesture) {
 				mavlink_log_critical(&_mavlink_log_pub, "Disarming denied: not landed\t");
 				events::send(events::ID("commander_disarm_denied_not_landed"),
@@ -826,6 +827,10 @@ Commander::handle_command(const vehicle_command_s &cmd)
 					case PX4_CUSTOM_SUB_MODE_POSCTL_SLOW:
 						desired_nav_state = vehicle_status_s::NAVIGATION_STATE_POSITION_SLOW;
 						break;
+
+					case PX4_CUSTOM_SUB_MODE_POSCTL_AM_POSE:
+						desired_nav_state = vehicle_status_s::NAVIGATION_STATE_AM_POSE;
+						break;
 					}
 
 				} else if (custom_main_mode == PX4_CUSTOM_MAIN_MODE_AUTO) {
@@ -883,7 +888,19 @@ Commander::handle_command(const vehicle_command_s &cmd)
 					desired_nav_state = vehicle_status_s::NAVIGATION_STATE_STAB;
 
 				} else if (custom_main_mode == PX4_CUSTOM_MAIN_MODE_OFFBOARD) {
-					desired_nav_state = vehicle_status_s::NAVIGATION_STATE_OFFBOARD;
+					if (custom_sub_mode == 0) {
+						desired_nav_state = vehicle_status_s::NAVIGATION_STATE_OFFBOARD;
+
+					} else {
+						main_ret = TRANSITION_DENIED;
+						mavlink_log_critical(&_mavlink_log_pub, "Unsupported offboard sub-mode\t");
+						/* EVENT
+						 * @description
+						 * Use the standard Offboard MAVLink mode. The controller is selected through OffboardControlMode.
+						 */
+						events::send(events::ID("commander_unsupported_offboard_submode"), events::Log::Error,
+							     "Unsupported offboard sub-mode");
+					}
 				}
 
 			} else {
@@ -2599,10 +2616,24 @@ void Commander::control_status_leds(bool changed, const uint8_t battery_warning)
 
 void Commander::updateControlMode()
 {
-	_vehicle_control_mode = {};
+	if (_vehicle_status.nav_state != vehicle_status_s::NAVIGATION_STATE_OFFBOARD) {
+		_offboard_controller_type_latched = false;
+		_latched_offboard_control_mode = {};
 
+	} else if (!_offboard_controller_type_latched) {
+		_latched_offboard_control_mode = _offboard_control_mode_sub.get();
+		_offboard_controller_type_latched = true;
+
+	} else if (_offboard_control_mode_sub.get().controller_type
+		   == _latched_offboard_control_mode.controller_type) {
+		_latched_offboard_control_mode = _offboard_control_mode_sub.get();
+	}
+
+	const offboard_control_mode_s &effective_offboard_control_mode = _offboard_controller_type_latched
+			? _latched_offboard_control_mode : _offboard_control_mode_sub.get();
+	_vehicle_control_mode = {};
 	mode_util::getVehicleControlMode(_vehicle_status.nav_state,
-					 _vehicle_status.vehicle_type, _offboard_control_mode_sub.get(), _vehicle_control_mode);
+					 _vehicle_status.vehicle_type, effective_offboard_control_mode, _vehicle_control_mode);
 	_mode_management.updateControlMode(_vehicle_status.nav_state, _vehicle_control_mode);
 
 	_vehicle_control_mode.flag_armed = isArmed();
@@ -2613,6 +2644,13 @@ void Commander::updateControlMode()
 		    || _vehicle_control_mode.flag_control_position_enabled
 		    || _vehicle_control_mode.flag_control_velocity_enabled
 		    || _vehicle_control_mode.flag_control_acceleration_enabled);
+
+	if (mode_util::isAnyAmPoseControlMode(_vehicle_control_mode)) {
+		// AM Pose uses FlightModeManager to generate manual trajectory setpoints,
+		// or consumes external position setpoints, without running mc_pos_control.
+		_vehicle_control_mode.flag_multicopter_position_control_enabled = false;
+	}
+
 	_vehicle_control_mode.timestamp = hrt_absolute_time();
 	_vehicle_control_mode_pub.publish(_vehicle_control_mode);
 }
@@ -2983,7 +3021,8 @@ void Commander::manualControlCheck()
 void Commander::offboardControlCheck()
 {
 	if (_offboard_control_mode_sub.update()) {
-		if (_failsafe_flags.offboard_control_signal_lost) {
+		if (_failsafe_flags.offboard_control_signal_lost
+		    || _vehicle_status.nav_state == vehicle_status_s::NAVIGATION_STATE_OFFBOARD) {
 			// Run arming checks immediately to allow for offboard mode activation
 			_status_changed = true;
 		}
@@ -3050,7 +3089,7 @@ The commander module contains the state machine for mode switching and failsafe 
 	PRINT_MODULE_USAGE_COMMAND("land");
 	PRINT_MODULE_USAGE_COMMAND_DESCR("transition", "VTOL transition");
 	PRINT_MODULE_USAGE_COMMAND_DESCR("mode", "Change flight mode");
-	PRINT_MODULE_USAGE_ARG("manual|acro|offboard|stabilized|altctl|posctl|altitude_cruise|position:slow|auto:mission|auto:loiter|auto:rtl|auto:takeoff|auto:land|auto:precland|ext1",
+	PRINT_MODULE_USAGE_ARG("manual|acro|offboard|stabilized|altctl|posctl|am_pose|altitude_cruise|position:slow|auto:mission|auto:loiter|auto:rtl|auto:takeoff|auto:land|auto:precland|ext1",
 			"Flight mode", false);
 	PRINT_MODULE_USAGE_COMMAND("pair");
 	PRINT_MODULE_USAGE_COMMAND("termination");

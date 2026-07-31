@@ -322,6 +322,10 @@ void CrsfRc::Run()
 						flight_mode = "Offboard";
 						break;
 
+					case vehicle_status_s::NAVIGATION_STATE_AM_POSE:
+						flight_mode = "AM Pose";
+						break;
+
 					case vehicle_status_s::NAVIGATION_STATE_STAB:
 						flight_mode = "Stabilized";
 						break;

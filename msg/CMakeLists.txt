@@ -44,6 +44,11 @@ set(msg_files
 	ActuatorServosTrim.msg
 	ActuatorTest.msg
 	AdcReport.msg
+	AmPoseControlStatus.msg
+	AmPosePolicyObservation.msg
+	AmPoseTrajectoryWaypoint.msg
+	AmPoseTrajectory.msg
+	ArmJointState.msg
 	Airspeed.msg
 	AirspeedWind.msg
 	AutotuneAttitudeControlStatus.msg

@@ -39,6 +39,7 @@
 #include "HealthAndArmingChecks/HealthAndArmingChecks.hpp"
 #include "HomePosition.hpp"
 #include "ModeManagement.hpp"
+#include "ModeUtil/control_mode.hpp"
 #include "MulticopterThrowLaunch/MulticopterThrowLaunch.hpp"
 #include "Safety.hpp"
 #include "UserModeIntention.hpp"
@@ -122,6 +123,18 @@ public:
 
 	void enable_hil();
 
+	static uint8_t getNavStateForArmingCheck(uint8_t current_nav_state, uint8_t user_intended_nav_state)
+	{
+		switch (user_intended_nav_state) {
+		case vehicle_status_s::NAVIGATION_STATE_POSCTL:
+		case vehicle_status_s::NAVIGATION_STATE_AM_POSE:
+			return user_intended_nav_state;
+
+		default:
+			return current_nav_state;
+		}
+	}
+
 private:
 	bool isArmed() const { return (_vehicle_status.arming_state == vehicle_status_s::ARMING_STATE_ARMED); }
 	static ModeChangeSource getSourceFromCommand(const vehicle_command_s &cmd);
@@ -131,6 +144,25 @@ private:
 	transition_result_t arm(arm_disarm_reason_t calling_reason, bool run_preflight_checks = true);
 
 	transition_result_t disarm(arm_disarm_reason_t calling_reason, bool forced = false);
+
+	static bool manualDisarmInAirAllowed(const vehicle_status_s &vehicle_status,
+					     const vehicle_control_mode_s &vehicle_control_mode,
+					     arm_disarm_reason_t calling_reason, bool com_disarm_man)
+	{
+		const bool mc_manual_thrust_mode = vehicle_status.vehicle_type == vehicle_status_s::VEHICLE_TYPE_ROTARY_WING
+						   && vehicle_control_mode.flag_control_manual_enabled
+						   && !vehicle_control_mode.flag_control_climb_rate_enabled;
+		const bool am_control_nav_state = (vehicle_status.nav_state == vehicle_status_s::NAVIGATION_STATE_AM_POSE)
+						  || (vehicle_status.nav_state == vehicle_status_s::NAVIGATION_STATE_OFFBOARD);
+		const bool am_pose_control_mode = vehicle_status.vehicle_type == vehicle_status_s::VEHICLE_TYPE_ROTARY_WING
+						  && am_control_nav_state
+						  && mode_util::isAnyAmPoseControlMode(vehicle_control_mode);
+		const bool commanded_by_rc = (calling_reason == arm_disarm_reason_t::stick_gesture)
+					     || (calling_reason == arm_disarm_reason_t::rc_switch)
+					     || (calling_reason == arm_disarm_reason_t::rc_button);
+
+		return commanded_by_rc && com_disarm_man && (mc_manual_thrust_mode || am_pose_control_mode);
+	}
 
 	void battery_status_check();
 
@@ -280,6 +312,8 @@ private:
 	bool _have_taken_off_since_arming{false};
 	bool _status_changed{true};
 	bool _mission_in_progress{false};
+	bool _offboard_controller_type_latched{false};
+	offboard_control_mode_s _latched_offboard_control_mode{};
 
 	vehicle_land_detected_s	_vehicle_land_detected{};
 

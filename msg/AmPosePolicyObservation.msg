@@ -1,0 +1,43 @@
+uint64 timestamp
+uint64 timestamp_sample
+uint64 observation_build_timestamp
+
+uint64 vehicle_local_position_timestamp
+uint64 vehicle_local_position_timestamp_sample
+uint64 vehicle_attitude_timestamp
+uint64 vehicle_attitude_timestamp_sample
+uint64 vehicle_angular_velocity_timestamp
+uint64 vehicle_angular_velocity_timestamp_sample
+uint64 arm_joint_state_timestamp
+uint64 arm_joint_state_timestamp_sample
+uint32 arm_joint_state_sequence
+uint32 arm_joint_state_position_wrap_mask
+uint64 trajectory_setpoint_timestamp
+uint64 am_pose_trajectory_timestamp
+uint64 offboard_control_mode_timestamp
+uint64 policy_inference_start_timestamp
+uint64 policy_inference_finish_timestamp
+uint32 policy_sequence
+
+uint8 takeoff_state
+uint32 degraded_flags
+
+uint32 DEGRADED_NONE = 0
+uint32 DEGRADED_LOCAL_XY_INVALID = 1
+uint32 DEGRADED_LOCAL_VXY_INVALID = 2
+uint32 DEGRADED_SETPOINT_DEFAULTED = 4
+
+uint8 OBSERVATION_DIM_NO_ARM = 130
+uint8 OBSERVATION_DIM_SINGLE_ARM_FEATURE = 134
+uint8 OBSERVATION_DIM_POSITION_VELOCITY = 138
+uint8 ARM_OBSERVATION_NONE = 0
+uint8 ARM_OBSERVATION_POSITION = 1
+uint8 ARM_OBSERVATION_VELOCITY = 2
+uint8 observation_dim
+uint8 arm_observation_features
+
+float32[138] observation
+float32[4] raw_action
+float32[4] mapped_action
+
+# TOPICS am_pose_policy_observation

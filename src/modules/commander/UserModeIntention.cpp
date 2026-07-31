@@ -34,6 +34,8 @@
 
 #include "UserModeIntention.hpp"
 
+#include "HealthAndArmingChecks/HealthAndArmingChecks.hpp"
+
 UserModeIntention::UserModeIntention(const vehicle_status_s &vehicle_status,
 				     const HealthAndArmingChecks &health_and_arming_checks, ModeChangeHandler *handler)
 	: _vehicle_status(vehicle_status), _health_and_arming_checks(health_and_arming_checks),
@@ -52,7 +54,8 @@ bool UserModeIntention::change(uint8_t user_intended_nav_state, ModeChangeSource
 	}
 
 	// Always allow mode change while disarmed
-	bool always_allow = force || !isArmed();
+	const bool armed = isArmed();
+	bool always_allow = force || !armed;
 	bool allow_change = true;
 
 	if (!always_allow) {
@@ -67,6 +70,8 @@ bool UserModeIntention::change(uint8_t user_intended_nav_state, ModeChangeSource
 			}
 		}
 	}
+
+	allow_change &= modeChangeAllowedByArmingState(armed, user_intended_nav_state);
 
 	// never allow to change out of termination state
 	allow_change &= _vehicle_status.nav_state != vehicle_status_s::NAVIGATION_STATE_TERMINATION;

@@ -109,6 +109,8 @@ public:
 
 	void set_rate_factor(float rate_factor) { _rate_factor = rate_factor; }
 
+	bool has_subscription(orb_id_t id, uint8_t instance = 0) const;
+
 private:
 
 	/**
